@@ -42,4 +42,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
-*.log 
+*.log
+
+# Large files
+*.rar
+restocafe.rar 
