@@ -7,6 +7,9 @@ const routes = require('./routes');
 const connectDB = require('./config/db');
 const SocketService = require('./services/socketService');
 const { setSocketService } = require('./controllers/orderController');
+const securityMiddleware = require('./config/security');
+const errorHandler = require('./middleware/errorHandler');
+const logger = require('./utils/logger');
 
 const app = express();
 const httpServer = createServer(app);
@@ -25,21 +28,26 @@ const socketService = new SocketService(io);
 setSocketService(socketService);
 
 // Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
-}));
+app.use(securityMiddleware.helmet);
+app.use(securityMiddleware.cors);
+app.use(securityMiddleware.rateLimiter);
+app.use(securityMiddleware.hpp);
+app.use(securityMiddleware.customSecurity);
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
+
+// Request logging
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.url}`);
+  next();
+});
 
 // Routes
 app.use('/api', routes);
 
 // Error handling
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ message: 'Sunucu hatası' });
-});
+app.use(errorHandler);
 
 // Connect to database and start server
 const PORT = process.env.PORT || 5000;
