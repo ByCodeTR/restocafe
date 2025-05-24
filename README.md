@@ -5,8 +5,8 @@ RestoCafe, modern restoranlar için geliştirilmiş kapsamlı bir adisyon ve sip
 ## Özellikler
 
 ### Temel Özellikler
-- [ ] JWT tabanlı kullanıcı yetkilendirme sistemi
-- [ ] Rol bazlı erişim kontrolü (Admin, Garson, Mutfak, Kasiyer)
+- [x] JWT tabanlı kullanıcı yetkilendirme sistemi
+- [x] Rol bazlı erişim kontrolü (Admin, Garson, Mutfak, Kasiyer)
 - [ ] QR kodlu masa yönetim sistemi
 - [ ] Gerçek zamanlı masa durumu takibi
 - [ ] Kategori ve ürün yönetimi
@@ -85,10 +85,10 @@ npm start
 ## Geliştirme Fazları
 
 ### Faz 1: Temel Altyapı
-- [ ] Proje yapısı ve klasör organizasyonu
-- [ ] Veritabanı modelleri (User, Table, Product, Order)
+- [x] Proje yapısı ve klasör organizasyonu
+- [x] Veritabanı modelleri (User, Table, Product, Order)
 - [ ] Socket.io entegrasyonu
-- [ ] JWT tabanlı auth sistemi
+- [x] JWT tabanlı auth sistemi
 - [ ] Login sayfası
 - [ ] Protected Route bileşeni
 - [ ] Masa yönetim sistemi
