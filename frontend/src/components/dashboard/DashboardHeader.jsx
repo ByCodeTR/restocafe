@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Menu } from '@headlessui/react';
 import { BellIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 import LanguageSwitcher from '../common/LanguageSwitcher';
+import ThemeSwitcher from '../common/ThemeSwitcher';
 
 const DashboardHeader = () => {
   const user = useSelector(state => state.auth.user);
@@ -24,6 +25,9 @@ const DashboardHeader = () => {
           <div className="flex items-center space-x-4">
             {/* Language Switcher */}
             <LanguageSwitcher />
+
+            {/* Theme Switcher */}
+            <ThemeSwitcher />
 
             {/* Notifications */}
             <button

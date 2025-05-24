@@ -170,22 +170,41 @@ npm start
   - [x] Gerçek zamanlı istatistikler
   - [x] Grafik ve tablolar
   - [x] Özelleştirilebilir görünüm
-- [ ] Çoklu dil desteği
-  - [ ] Türkçe
-  - [ ] İngilizce
-  - [ ] Dil dosyaları yönetimi
-- [ ] Tema özelleştirme
-  - [ ] Renk şemaları
-  - [ ] Logo ve marka ayarları
-  - [ ] Özel CSS desteği
+- [x] Çoklu dil desteği
+  - [x] Türkçe
+  - [x] İngilizce
+  - [x] Dil dosyaları yönetimi
+- [x] Tema özelleştirme
+  - [x] Renk şemaları
+  - [x] Logo ve marka ayarları
+  - [x] Özel CSS desteği
 
 ### Faz 4: Optimizasyon ve Test
 - [ ] Performans optimizasyonu
+  - [ ] Kod bölme (Code splitting)
+  - [ ] Lazy loading
+  - [ ] Önbellek stratejileri
+  - [ ] API optimizasyonu
 - [ ] Güvenlik testleri
+  - [ ] Penetrasyon testleri
+  - [ ] Güvenlik açığı taraması
+  - [ ] OWASP kontrolleri
 - [ ] Yük testleri
+  - [ ] Stres testleri
+  - [ ] Performans testleri
+  - [ ] Ölçeklenebilirlik testleri
 - [ ] End-to-end testler
+  - [ ] Kullanıcı senaryoları
+  - [ ] Entegrasyon testleri
+  - [ ] Regresyon testleri
 - [ ] Dokümantasyon
+  - [ ] API dokümantasyonu
+  - [ ] Kullanıcı kılavuzu
+  - [ ] Geliştirici kılavuzu
 - [ ] Deployment kılavuzu
+  - [ ] Kurulum adımları
+  - [ ] Yapılandırma
+  - [ ] Bakım ve güncelleme
 
 ## API Dokümantasyonu
 
@@ -244,39 +263,4 @@ npm start
 #### Sunucu Events (Emit)
 - `newOrder` - Yeni sipariş bildirimi
 - `orderStatusUpdate` - Sipariş durumu güncelleme
-- `orderCompleted` - Sipariş tamamlama
-- `orderCancelled` - Sipariş iptal
-- `tableUpdate` - Masa durumu güncelleme
-- `lowStockAlert` - Düşük stok uyarısı
-- `newReservation` - Yeni rezervasyon bildirimi
-- `reservationUpdate` - Rezervasyon durumu güncelleme
-- `reservationCancel` - Rezervasyon iptal
-
-#### İstemci Events (Listen)
-- `authenticate` - Kullanıcı kimlik doğrulama
-- `joinKitchen` - Mutfak odasına katılma
-- `joinTable` - Masa odasına katılma
-- `disconnect` - Bağlantı kesme
-- `joinReservations` - Rezervasyon odasına katılma
-
-### Bildirim Türleri
 - `
-
-### Müşteri Endpoints
-- `GET /api/customers` - Müşterileri listele (Filtreleme & Sayfalama)
-- `GET /api/customers/:id` - Müşteri detayı
-- `POST /api/customers` - Yeni müşteri oluştur
-- `PATCH /api/customers/:id` - Müşteri güncelle
-- `GET /api/customers/:id/stats` - Müşteri istatistikleri
-
-### Raporlama Endpoints
-- `GET /api/reports/sales/daily` - Günlük satış raporu
-- `GET /api/reports/sales/weekly` - Haftalık satış raporu
-- `GET /api/reports/sales/monthly` - Aylık satış raporu
-- `GET /api/reports/products` - Ürün satış raporu
-- `GET /api/reports/categories` - Kategori satış raporu
-- `GET /api/reports/waiters` - Garson performans raporu
-- `GET /api/reports/customers` - Müşteri analiz raporu
-- `GET /api/reports/reservations` - Rezervasyon analiz raporu
-- `GET /api/reports/inventory` - Stok raporu
-- `GET /api/reports/financial` - Finansal rapor

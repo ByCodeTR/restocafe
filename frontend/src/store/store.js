@@ -9,6 +9,7 @@ import waiterReducer from './slices/waiterSlice';
 import reservationReducer from './slices/reservationSlice';
 import customerReducer from './slices/customerSlice';
 import reportReducer from './slices/reportSlice';
+import themeReducer from './slices/themeSlice';
 
 export const store = configureStore({
   reducer: {
@@ -21,6 +22,7 @@ export const store = configureStore({
     waiter: waiterReducer,
     reservations: reservationReducer,
     customers: customerReducer,
-    reports: reportReducer
+    reports: reportReducer,
+    theme: themeReducer
   }
 }); 
