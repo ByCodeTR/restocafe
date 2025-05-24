@@ -1,15 +1,16 @@
 const express = require('express');
 const cors = require('cors');
-const morgan = require('morgan');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const dotenv = require('dotenv');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-const routes = require('./routes');
-const connectDB = require('./config/db');
+const sequelize = require('./config/db');
 const SocketService = require('./services/socketService');
-const { setSocketService } = require('./controllers/orderController');
-const securityMiddleware = require('./config/security');
 const errorHandler = require('./middleware/errorHandler');
-const logger = require('./utils/logger');
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 const httpServer = createServer(app);
@@ -17,7 +18,7 @@ const httpServer = createServer(app);
 // Socket.IO setup
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true
   }
@@ -25,42 +26,53 @@ const io = new Server(httpServer, {
 
 // Initialize socket service
 const socketService = new SocketService(io);
-setSocketService(socketService);
 
 // Middleware
-app.use(securityMiddleware.helmet);
-app.use(securityMiddleware.cors);
-app.use(securityMiddleware.rateLimiter);
-app.use(securityMiddleware.hpp);
-app.use(securityMiddleware.customSecurity);
+app.use(cors());
+app.use(helmet());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(morgan('dev'));
 
-// Request logging
-app.use((req, res, next) => {
-  logger.info(`${req.method} ${req.url}`);
-  next();
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use(limiter);
+
+// Database connection
+sequelize.authenticate()
+  .then(() => {
+    console.log('MySQL bağlantısı başarılı');
+    return sequelize.sync({ alter: true }); // Tabloları otomatik oluştur/güncelle
+  })
+  .then(() => {
+    console.log('Veritabanı tabloları senkronize edildi');
+  })
+  .catch(err => {
+    console.error('Veritabanı bağlantı hatası:', err);
+  });
+
+// Ana route
+app.get('/', (req, res) => {
+  res.json({
+    message: 'RestoCafe API',
+    version: '1.0.0',
+    status: 'active'
+  });
 });
 
-// Routes
-app.use('/api', routes);
+// API Routes
+app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/tables', require('./routes/tableRoutes'));
+app.use('/api/categories', require('./routes/categoryRoutes'));
+app.use('/api/products', require('./routes/productRoutes'));
+app.use('/api/orders', require('./routes/orderRoutes'));
+app.use('/api/reservations', require('./routes/reservationRoutes'));
+app.use('/api/customers', require('./routes/customerRoutes'));
+app.use('/api/reports', require('./routes/reportRoutes'));
 
 // Error handling
 app.use(errorHandler);
 
-// Connect to database and start server
-const PORT = process.env.PORT || 5000;
-
-connectDB()
-  .then(() => {
-    httpServer.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  })
-  .catch(err => {
-    console.error('Database connection failed:', err);
-    process.exit(1);
-  });
-
-module.exports = app; 
+module.exports = { app, httpServer }; 

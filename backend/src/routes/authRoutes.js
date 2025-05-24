@@ -54,4 +54,25 @@ router.post('/login', loginValidation, login);
 router.get('/me', auth, getProfile);
 router.put('/profile', [auth, ...updateProfileValidation], updateProfile);
 
+// Temporary route handlers
+router.post('/register', (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+});
+
+router.post('/login', (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+});
+
+router.post('/logout', (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+});
+
+router.get('/me', (req, res) => {
+  res.json({ message: 'Get current user endpoint' });
+});
+
+router.put('/profile', (req, res) => {
+  res.json({ message: 'Update profile endpoint' });
+});
+
 module.exports = router; 

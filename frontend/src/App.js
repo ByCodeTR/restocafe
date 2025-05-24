@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -39,53 +39,10 @@ function App() {
   return (
     <Provider store={store}>
       <Router>
-        <ToastContainer position="top-right" />
+        <ToastContainer position="top-right" autoClose={3000} />
         <Routes>
-          <Route path="/login" element={<Login />} />
-          
-          <Route element={<Layout />}>
-            <Route path="/" element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/tables" element={
-              <ProtectedRoute>
-                <Tables />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/orders" element={
-              <ProtectedRoute>
-                <Orders />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/kitchen" element={
-              <ProtectedRoute>
-                <Kitchen />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/products" element={
-              <ProtectedRoute>
-                <Products />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/reports" element={
-              <ProtectedRoute>
-                <Reports />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="/settings" element={
-              <ProtectedRoute>
-                <Settings />
-              </ProtectedRoute>
-            } />
-          </Route>
+          <Route path="/" element={<Layout />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <Notifications />
       </Router>

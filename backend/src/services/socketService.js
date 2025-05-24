@@ -5,52 +5,67 @@ class SocketService {
     this.io = io;
     this.connectedUsers = new Map(); // userId -> socketId
     this.connectedKitchens = new Set(); // socketIds of kitchen clients
-    this.initialize();
+    this.setupEventHandlers();
   }
 
-  initialize() {
+  setupEventHandlers() {
     this.io.on('connection', (socket) => {
-      console.log('New client connected:', socket.id);
+      console.log('Client connected:', socket.id);
 
-      // Kullanıcı kimlik doğrulama
-      socket.on('authenticate', (data) => {
-        if (data.userId) {
-          this.connectedUsers.set(data.userId, socket.id);
-          socket.userId = data.userId;
-          socket.role = data.role;
-
-          // Mutfak kullanıcılarını ayrıca takip et
-          if (data.role === 'kitchen') {
-            this.connectedKitchens.add(socket.id);
-          }
-
-          console.log(`User authenticated: ${data.userId} (${data.role})`);
-        }
+      // Masa durumu değişikliği
+      socket.on('tableStatusChange', (data) => {
+        this.io.emit('tableStatusUpdated', data);
       });
 
-      // Mutfak ekranına bağlanma
-      socket.on('joinKitchen', () => {
-        socket.join('kitchen');
-        console.log('Client joined kitchen room:', socket.id);
+      // Yeni sipariş
+      socket.on('newOrder', (data) => {
+        this.io.emit('orderCreated', data);
       });
 
-      // Masa takibi
-      socket.on('joinTable', (tableId) => {
-        socket.join(`table:${tableId}`);
-        console.log(`Client joined table room: ${tableId}`);
+      // Sipariş durumu değişikliği
+      socket.on('orderStatusChange', (data) => {
+        this.io.emit('orderStatusUpdated', data);
       });
 
-      // Bağlantı koptuğunda
+      // Yeni rezervasyon
+      socket.on('newReservation', (data) => {
+        this.io.emit('reservationCreated', data);
+      });
+
+      // Rezervasyon durumu değişikliği
+      socket.on('reservationStatusChange', (data) => {
+        this.io.emit('reservationStatusUpdated', data);
+      });
+
       socket.on('disconnect', () => {
-        if (socket.userId) {
-          this.connectedUsers.delete(socket.userId);
-        }
-        if (this.connectedKitchens.has(socket.id)) {
-          this.connectedKitchens.delete(socket.id);
-        }
         console.log('Client disconnected:', socket.id);
       });
     });
+  }
+
+  // Masa durumunu güncelle
+  updateTableStatus(tableId, status) {
+    this.io.emit('tableStatusUpdated', { tableId, status });
+  }
+
+  // Yeni sipariş bildirimi
+  notifyNewOrder(order) {
+    this.io.emit('orderCreated', order);
+  }
+
+  // Sipariş durumu güncelleme bildirimi
+  notifyOrderStatusUpdate(orderId, status) {
+    this.io.emit('orderStatusUpdated', { orderId, status });
+  }
+
+  // Yeni rezervasyon bildirimi
+  notifyNewReservation(reservation) {
+    this.io.emit('reservationCreated', reservation);
+  }
+
+  // Rezervasyon durumu güncelleme bildirimi
+  notifyReservationStatusUpdate(reservationId, status) {
+    this.io.emit('reservationStatusUpdated', { reservationId, status });
   }
 
   // Yeni sipariş bildirimi

@@ -13,35 +13,34 @@ const errorHandler = (err, req, res, next) => {
     user: req.user ? req.user.id : null
   });
 
-  // Default error
-  let statusCode = err.statusCode || 500;
-  let message = err.message || 'Internal Server Error';
+  console.error(err.stack);
 
-  // Handle specific error types
-  if (err.name === 'ValidationError') {
-    statusCode = 400;
-    message = Object.values(err.errors).map(error => error.message).join(', ');
-  } else if (err.name === 'CastError') {
-    statusCode = 400;
-    message = 'Invalid ID format';
-  } else if (err.code === 11000) {
-    statusCode = 409;
-    message = 'Duplicate field value entered';
-  } else if (err.name === 'JsonWebTokenError') {
-    statusCode = 401;
-    message = 'Invalid token';
-  } else if (err.name === 'TokenExpiredError') {
-    statusCode = 401;
-    message = 'Token expired';
+  if (err.name === 'SequelizeValidationError') {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Validation error',
+      errors: err.errors.map(e => ({
+        field: e.path,
+        message: e.message
+      }))
+    });
   }
 
-  // Send error response
-  res.status(statusCode).json({
-    success: false,
-    error: {
-      message,
-      ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-    }
+  if (err.name === 'SequelizeUniqueConstraintError') {
+    return res.status(409).json({
+      status: 'error',
+      message: 'Duplicate entry',
+      errors: err.errors.map(e => ({
+        field: e.path,
+        message: e.message
+      }))
+    });
+  }
+
+  // Default error
+  res.status(err.status || 500).json({
+    status: 'error',
+    message: err.message || 'Internal server error'
   });
 };
 

@@ -55,11 +55,26 @@ const reorderValidation = [
 ];
 
 // Routes
-router.get('/', auth, getCategories);
-router.get('/:id', auth, getCategoryById);
-router.post('/', [auth, authorize('admin'), ...categoryValidation], createCategory);
-router.put('/:id', [auth, authorize('admin'), ...categoryValidation], updateCategory);
-router.delete('/:id', [auth, authorize('admin')], deleteCategory);
+router.get('/', (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+});
+
+router.post('/', (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+});
+
+router.get('/:id', (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+});
+
+router.put('/:id', (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+});
+
+router.delete('/:id', (req, res) => {
+  res.status(501).json({ message: 'Not implemented yet' });
+});
+
 router.patch('/reorder', [auth, authorize('admin'), ...reorderValidation], reorderCategories);
 
 module.exports = router; 
