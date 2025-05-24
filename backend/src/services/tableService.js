@@ -2,6 +2,12 @@ const Table = require('../models/Table');
 const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const { Op } = require('sequelize');
+const cache = require('../utils/cache');
+
+const CACHE_KEYS = {
+  ALL_TABLES: 'tables:all',
+  TABLE_DETAIL: (id) => `table:${id}`
+};
 
 class TableService {
   /**
@@ -53,6 +59,11 @@ class TableService {
    * @returns {Promise<Table>}
    */
   async getTableById(tableId) {
+    // Try cache first
+    const cachedTable = await cache.get(CACHE_KEYS.TABLE_DETAIL(tableId));
+    if (cachedTable) return cachedTable;
+
+    // If not in cache, get from DB
     const table = await Table.findByPk(tableId, {
       include: [{
         model: User,
@@ -65,6 +76,8 @@ class TableService {
       throw new ApiError(404, 'Masa bulunamadı');
     }
 
+    // Cache the result
+    await cache.set(CACHE_KEYS.TABLE_DETAIL(tableId), table);
     return table;
   }
 
@@ -84,6 +97,8 @@ class TableService {
     }
 
     const table = await Table.create(tableData);
+    // Invalidate all tables cache
+    await cache.del(CACHE_KEYS.ALL_TABLES);
     return this.getTableById(table.id);
   }
 
@@ -111,6 +126,11 @@ class TableService {
     }
 
     await table.update(updateData);
+    // Invalidate related caches
+    await Promise.all([
+      cache.del(CACHE_KEYS.ALL_TABLES),
+      cache.del(CACHE_KEYS.TABLE_DETAIL(tableId))
+    ]);
     return this.getTableById(tableId);
   }
 
@@ -128,6 +148,11 @@ class TableService {
     }
 
     await table.update({ isActive: false });
+    // Invalidate related caches
+    await Promise.all([
+      cache.del(CACHE_KEYS.ALL_TABLES),
+      cache.del(CACHE_KEYS.TABLE_DETAIL(tableId))
+    ]);
   }
 
   /**
@@ -140,6 +165,11 @@ class TableService {
   async updateTableStatus(tableId, status, waiterId = null) {
     const table = await this.getTableById(tableId);
     await table.updateStatus(status, waiterId);
+    // Invalidate related caches
+    await Promise.all([
+      cache.del(CACHE_KEYS.ALL_TABLES),
+      cache.del(CACHE_KEYS.TABLE_DETAIL(tableId))
+    ]);
     return this.getTableById(tableId);
   }
 
@@ -159,6 +189,11 @@ class TableService {
     }
 
     await table.assignWaiter(waiterId);
+    // Invalidate related caches
+    await Promise.all([
+      cache.del(CACHE_KEYS.ALL_TABLES),
+      cache.del(CACHE_KEYS.TABLE_DETAIL(tableId))
+    ]);
     return this.getTableById(tableId);
   }
 
@@ -170,6 +205,11 @@ class TableService {
   async removeWaiter(tableId) {
     const table = await this.getTableById(tableId);
     await table.removeWaiter();
+    // Invalidate related caches
+    await Promise.all([
+      cache.del(CACHE_KEYS.ALL_TABLES),
+      cache.del(CACHE_KEYS.TABLE_DETAIL(tableId))
+    ]);
     return this.getTableById(tableId);
   }
 
@@ -224,6 +264,24 @@ class TableService {
       order: [['number', 'ASC']]
     });
 
+    return tables;
+  }
+
+  async getAllTables() {
+    // Try to get from cache first
+    const cachedTables = await cache.get(CACHE_KEYS.ALL_TABLES);
+    if (cachedTables) return cachedTables;
+
+    // If not in cache, get from DB and cache it
+    const tables = await Table.findAll({
+      include: [{
+        model: User,
+        as: 'currentWaiter',
+        attributes: ['id', 'firstName', 'lastName']
+      }],
+      order: [['number', 'ASC']]
+    });
+    await cache.set(CACHE_KEYS.ALL_TABLES, tables);
     return tables;
   }
 }

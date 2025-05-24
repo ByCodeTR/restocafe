@@ -6,6 +6,8 @@ const Product = require('../models/Product');
 const { ValidationError, Op } = require('sequelize');
 const ApiError = require('../utils/ApiError');
 const socketService = require('../services/socketService');
+const orderService = require('../services/orderService');
+const catchAsync = require('../utils/catchAsync');
 
 // @desc    Get all orders
 // @route   GET /api/orders
@@ -406,4 +408,37 @@ exports.getDailyOrdersSummary = async (req, res) => {
     console.error('Get daily orders summary error:', error);
     res.status(500).json({ message: 'Sunucu hatası' });
   }
+};
+
+const bulkUpdateOrderStatus = catchAsync(async (req, res) => {
+  const { orders } = req.body;
+  if (!Array.isArray(orders)) {
+    throw new ApiError(400, 'orders must be an array');
+  }
+
+  const results = await orderService.bulkUpdateStatus(orders);
+  res.json(results);
+});
+
+const bulkCreateOrders = catchAsync(async (req, res) => {
+  const { orders } = req.body;
+  if (!Array.isArray(orders)) {
+    throw new ApiError(400, 'orders must be an array');
+  }
+
+  const results = await orderService.bulkCreate(orders);
+  res.json(results);
+});
+
+module.exports = {
+  getAllOrders,
+  getOrderById,
+  createOrder,
+  updateOrder,
+  deleteOrder,
+  updateOrderStatus,
+  addPayment,
+  getDailyOrdersSummary,
+  bulkUpdateOrderStatus,
+  bulkCreateOrders
 }; 

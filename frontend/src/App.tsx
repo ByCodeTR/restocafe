@@ -1,73 +1,55 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './features/auth/hooks/useAuth';
-import { authService } from './features/auth/services/authService';
-
-// Layouts
+import React, { Suspense, lazy } from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import LoadingSpinner from './components/LoadingSpinner';
 import MainLayout from './layouts/MainLayout';
 import AuthLayout from './layouts/AuthLayout';
+import { useAuth } from './features/auth/hooks/useAuth';
 
-// Pages
-import LoginPage from './features/auth/components/LoginPage';
-import RegisterPage from './features/auth/components/RegisterPage';
-import DashboardPage from './features/dashboard/components/DashboardPage';
-import TableList from './features/tables/components/TableList';
-import TableDetail from './features/tables/components/TableDetail';
-import TableForm from './features/tables/components/TableForm';
-import OrderList from './features/orders/components/OrderList';
-import OrderDetail from './features/orders/components/OrderDetail';
-import OrderForm from './features/orders/components/OrderForm';
-import ReservationList from './features/reservations/components/ReservationList';
-import ReservationDetail from './features/reservations/components/ReservationDetail';
-import ReservationForm from './features/reservations/components/ReservationForm';
-import NotFoundPage from './components/NotFoundPage';
+// Lazy loaded components
+const LoginPage = lazy(() => import('./features/auth/components/LoginPage'));
+const RegisterPage = lazy(() => import('./features/auth/components/RegisterPage'));
+const DashboardPage = lazy(() => import('./features/dashboard/components/DashboardPage'));
+const TableList = lazy(() => import('./features/tables/components/TableList'));
+const TableDetail = lazy(() => import('./features/tables/components/TableDetail'));
+const OrderList = lazy(() => import('./features/orders/components/OrderList'));
+const OrderDetail = lazy(() => import('./features/orders/components/OrderDetail'));
+const ReservationList = lazy(() => import('./features/reservations/components/ReservationList'));
+const ReservationDetail = lazy(() => import('./features/reservations/components/ReservationDetail'));
+const NotFoundPage = lazy(() => import('./components/NotFoundPage'));
 
-// Protected Route Component
-const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { isAuthenticated } = useAuth();
-  return isAuthenticated ? <>{children}</> : <Navigate to="/auth/login" />;
-};
+const App: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
 
-function App() {
-  useEffect(() => {
-    authService.initializeAuth();
-  }, []);
+  if (isLoading) {
+    return <LoadingSpinner />;
+  }
 
   return (
     <Router>
-      <Routes>
-        {/* Auth Routes */}
-        <Route element={<AuthLayout />}>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-        </Route>
-
-        {/* Protected Routes */}
-        <Route element={<MainLayout />}>
-          <Route path="/" element={<ProtectedRoute element={<DashboardPage />} />} />
-          
-          {/* Table Routes */}
-          <Route path="/tables" element={<ProtectedRoute element={<TableList />} />} />
-          <Route path="/tables/new" element={<ProtectedRoute element={<TableForm />} />} />
-          <Route path="/tables/:id" element={<ProtectedRoute element={<TableDetail />} />} />
-          
-          {/* Order Routes */}
-          <Route path="/orders" element={<ProtectedRoute element={<OrderList />} />} />
-          <Route path="/orders/new" element={<ProtectedRoute element={<OrderForm />} />} />
-          <Route path="/orders/:id" element={<ProtectedRoute element={<OrderDetail />} />} />
-
-          {/* Reservation Routes */}
-          <Route path="/reservations" element={<ProtectedRoute element={<ReservationList />} />} />
-          <Route path="/reservations/new" element={<ProtectedRoute element={<ReservationForm />} />} />
-          <Route path="/reservations/:id" element={<ProtectedRoute element={<ReservationDetail />} />} />
-          <Route path="/reservations/:id/edit" element={<ProtectedRoute element={<ReservationForm />} />} />
-        </Route>
-
-        {/* 404 Page */}
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
+      <Suspense fallback={<LoadingSpinner />}>
+        <Routes>
+          {!isAuthenticated ? (
+            <Route element={<AuthLayout />}>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/register" element={<RegisterPage />} />
+              <Route path="*" element={<LoginPage />} />
+            </Route>
+          ) : (
+            <Route element={<MainLayout />}>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/tables" element={<TableList />} />
+              <Route path="/tables/:id" element={<TableDetail />} />
+              <Route path="/orders" element={<OrderList />} />
+              <Route path="/orders/:id" element={<OrderDetail />} />
+              <Route path="/reservations" element={<ReservationList />} />
+              <Route path="/reservations/:id" element={<ReservationDetail />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Route>
+          )}
+        </Routes>
+      </Suspense>
     </Router>
   );
-}
+};
 
 export default App; 
