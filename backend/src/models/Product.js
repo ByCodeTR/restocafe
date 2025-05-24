@@ -1,9 +1,67 @@
 const mongoose = require('mongoose');
 
-const productSchema = new mongoose.Schema({
+// Varyasyon seçenek şeması (örn: Boyut: Küçük, Orta, Büyük)
+const optionSchema = new mongoose.Schema({
   name: {
     type: String,
     required: true,
+    trim: true
+  },
+  price: {
+    type: Number,
+    required: true,
+    min: 0
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  }
+});
+
+// Varyasyon grubu şeması (örn: Boyut, Ekstra Malzemeler)
+const variationSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  required: {
+    type: Boolean,
+    default: false
+  },
+  multiSelect: {
+    type: Boolean,
+    default: false
+  },
+  options: [optionSchema]
+});
+
+// Fiyat geçmişi şeması
+const priceHistorySchema = new mongoose.Schema({
+  price: {
+    type: Number,
+    required: true
+  },
+  startDate: {
+    type: Date,
+    required: true
+  },
+  endDate: {
+    type: Date,
+    default: null
+  },
+  reason: {
+    type: String,
+    trim: true
+  }
+}, {
+  timestamps: true
+});
+
+const productSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Ürün adı zorunludur'],
     trim: true
   },
   description: {
@@ -11,68 +69,135 @@ const productSchema = new mongoose.Schema({
     trim: true
   },
   category: {
-    type: String,
-    required: true,
-    enum: ['appetizer', 'main', 'dessert', 'beverage', 'side']
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+    required: [true, 'Kategori zorunludur']
   },
-  price: {
+  basePrice: {
     type: Number,
-    required: true
+    required: [true, 'Temel fiyat zorunludur'],
+    min: [0, 'Fiyat 0\'dan küçük olamaz']
+  },
+  priceHistory: [priceHistorySchema],
+  variations: [variationSchema],
+  images: [{
+    type: String,
+    validate: {
+      validator: function(v) {
+        return /^https?:\/\/.+/.test(v);
+      },
+      message: 'Geçersiz resim URL'
+    }
+  }],
+  stockTracking: {
+    type: Boolean,
+    default: false
+  },
+  currentStock: {
+    type: Number,
+    min: 0,
+    default: 0
+  },
+  minStock: {
+    type: Number,
+    min: 0,
+    default: 0
   },
   preparationTime: {
-    type: Number, // in minutes
-    default: 15
+    type: Number,
+    min: 0,
+    default: 15,
+    description: 'Dakika cinsinden hazırlama süresi'
   },
-  stock: {
-    current: {
-      type: Number,
-      required: true,
-      default: 0
-    },
-    minimum: {
-      type: Number,
-      required: true,
-      default: 10
-    },
-    unit: {
-      type: String,
-      required: true,
-      default: 'piece'
-    }
-  },
-  image: {
-    type: String
-  },
-  isAvailable: {
+  isActive: {
     type: Boolean,
     default: true
   },
+  isFeatured: {
+    type: Boolean,
+    default: false
+  },
   allergens: [{
-    type: String
+    type: String,
+    trim: true
   }],
-  ingredients: [{
-    item: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Ingredient'
-    },
-    quantity: Number
-  }]
+  nutritionalInfo: {
+    calories: Number,
+    protein: Number,
+    carbohydrates: Number,
+    fat: Number
+  },
+  tags: [{
+    type: String,
+    trim: true
+  }],
+  code: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true
+  }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Middleware to check stock before saving
-productSchema.pre('save', function(next) {
-  if (this.stock.current <= this.stock.minimum) {
-    // You could emit an event here for low stock notification
-    console.log(`Low stock alert for ${this.name}`);
+// Indexes for faster queries
+productSchema.index({ name: 1 });
+productSchema.index({ category: 1 });
+productSchema.index({ 'variations.name': 1 });
+productSchema.index({ code: 1 });
+productSchema.index({ tags: 1 });
+productSchema.index({ isActive: 1, isFeatured: 1 });
+
+// Virtual for current price (basePrice + active variations)
+productSchema.virtual('currentPrice').get(function() {
+  return this.basePrice;
+});
+
+// Middleware to update price history when basePrice changes
+productSchema.pre('save', async function(next) {
+  if (this.isModified('basePrice')) {
+    // End the current price period
+    const currentPriceHistory = this.priceHistory[this.priceHistory.length - 1];
+    if (currentPriceHistory && !currentPriceHistory.endDate) {
+      currentPriceHistory.endDate = new Date();
+    }
+
+    // Add new price to history
+    this.priceHistory.push({
+      price: this.basePrice,
+      startDate: new Date()
+    });
   }
   next();
 });
 
-// Index for faster queries
-productSchema.index({ category: 1 });
-productSchema.index({ 'stock.current': 1 });
-productSchema.index({ isAvailable: 1 });
+// Stock management methods
+productSchema.methods.updateStock = async function(quantity, type = 'remove') {
+  if (!this.stockTracking) return;
 
-module.exports = mongoose.model('Product', productSchema); 
+  if (type === 'remove') {
+    if (this.currentStock < quantity) {
+      throw new Error('Yetersiz stok');
+    }
+    this.currentStock -= quantity;
+  } else if (type === 'add') {
+    this.currentStock += quantity;
+  }
+
+  await this.save();
+};
+
+// Static method to check low stock products
+productSchema.statics.getLowStockProducts = async function() {
+  return this.find({
+    stockTracking: true,
+    currentStock: { $lte: this.minStock }
+  }).populate('category', 'name');
+};
+
+const Product = mongoose.model('Product', productSchema);
+
+module.exports = Product; 
