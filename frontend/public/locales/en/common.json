@@ -1,0 +1,80 @@
+{
+  "app": {
+    "name": "RestoCafe",
+    "tagline": "Restaurant Management System"
+  },
+  "navigation": {
+    "overview": "Overview",
+    "analytics": "Analytics",
+    "reports": "Reports",
+    "customers": "Customers",
+    "reservations": "Reservations",
+    "tables": "Tables",
+    "orders": "Orders",
+    "finance": "Finance"
+  },
+  "dashboard": {
+    "metrics": {
+      "totalSales": "Total Sales",
+      "totalOrders": "Total Orders",
+      "averageOrderValue": "Average Order Value",
+      "activeCustomers": "Active Customers"
+    },
+    "charts": {
+      "hourlySales": "Hourly Sales",
+      "salesByCategory": "Sales by Category",
+      "reservationsByHour": "Reservations by Hour"
+    }
+  },
+  "reports": {
+    "filters": {
+      "title": "Filters",
+      "type": "Type",
+      "timeRange": "Time Range",
+      "status": "Status"
+    },
+    "types": {
+      "sales": "Sales",
+      "products": "Products",
+      "categories": "Categories",
+      "waiters": "Waiters",
+      "customers": "Customers",
+      "reservations": "Reservations"
+    },
+    "timeRanges": {
+      "daily": "Daily",
+      "weekly": "Weekly",
+      "monthly": "Monthly"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive",
+      "error": "Error"
+    },
+    "actions": {
+      "quickReport": "Quick Report",
+      "refresh": "Refresh",
+      "delete": "Delete"
+    }
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "filter": "Filter",
+    "refresh": "Refresh",
+    "settings": "Settings",
+    "logout": "Sign out",
+    "confirmDelete": "Are you sure you want to delete this?",
+    "notifications": "View notifications",
+    "openUserMenu": "Open user menu",
+    "language": "Language",
+    "theme": "Theme",
+    "profile": "Profile"
+  }
+} 

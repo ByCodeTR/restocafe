@@ -1,0 +1,80 @@
+{
+  "app": {
+    "name": "RestoCafe",
+    "tagline": "Restoran Yönetim Sistemi"
+  },
+  "navigation": {
+    "overview": "Genel Bakış",
+    "analytics": "Analitik",
+    "reports": "Raporlar",
+    "customers": "Müşteriler",
+    "reservations": "Rezervasyonlar",
+    "tables": "Masalar",
+    "orders": "Siparişler",
+    "finance": "Finans"
+  },
+  "dashboard": {
+    "metrics": {
+      "totalSales": "Toplam Satış",
+      "totalOrders": "Toplam Sipariş",
+      "averageOrderValue": "Ortalama Sipariş Değeri",
+      "activeCustomers": "Aktif Müşteriler"
+    },
+    "charts": {
+      "hourlySales": "Saatlik Satışlar",
+      "salesByCategory": "Kategoriye Göre Satışlar",
+      "reservationsByHour": "Saate Göre Rezervasyonlar"
+    }
+  },
+  "reports": {
+    "filters": {
+      "title": "Filtreler",
+      "type": "Tür",
+      "timeRange": "Zaman Aralığı",
+      "status": "Durum"
+    },
+    "types": {
+      "sales": "Satışlar",
+      "products": "Ürünler",
+      "categories": "Kategoriler",
+      "waiters": "Garsonlar",
+      "customers": "Müşteriler",
+      "reservations": "Rezervasyonlar"
+    },
+    "timeRanges": {
+      "daily": "Günlük",
+      "weekly": "Haftalık",
+      "monthly": "Aylık"
+    },
+    "status": {
+      "active": "Aktif",
+      "inactive": "Pasif",
+      "error": "Hata"
+    },
+    "actions": {
+      "quickReport": "Hızlı Rapor",
+      "refresh": "Yenile",
+      "delete": "Sil"
+    }
+  },
+  "common": {
+    "loading": "Yükleniyor...",
+    "error": "Hata",
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "delete": "Sil",
+    "edit": "Düzenle",
+    "create": "Oluştur",
+    "search": "Ara",
+    "filter": "Filtrele",
+    "refresh": "Yenile",
+    "settings": "Ayarlar",
+    "logout": "Çıkış Yap",
+    "confirmDelete": "Silmek istediğinizden emin misiniz?",
+    "notifications": "Bildirimleri görüntüle",
+    "openUserMenu": "Kullanıcı menüsünü aç",
+    "language": "Dil",
+    "theme": "Tema",
+    "profile": "Profil"
+  }
+} 
