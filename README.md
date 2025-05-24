@@ -144,32 +144,32 @@ npm start
   - [x] Rezervasyon geçmişi
   - [x] Sipariş geçmişi
   - [x] Sadakat programı
-- [ ] Raporlama sistemi
-  - [ ] Satış raporları
-    - [ ] Günlük/haftalık/aylık satış analizleri
-    - [ ] Ürün bazlı satış raporları
-    - [ ] Kategori bazlı satış raporları
-    - [ ] Garson performans raporları
-  - [ ] Müşteri analizleri
-    - [ ] Müşteri segmentasyonu
-    - [ ] Sadakat programı analizleri
-    - [ ] Müşteri davranış analizleri
-  - [ ] Rezervasyon analizleri
-    - [ ] Doluluk oranları
-    - [ ] İptal/No-show analizleri
-    - [ ] Peak saat analizleri
-  - [ ] Stok raporları
-    - [ ] Stok tüketim analizleri
-    - [ ] Tedarik önerileri
-    - [ ] Fire raporları
-  - [ ] Finansal raporlar
-    - [ ] Gelir/gider analizleri
-    - [ ] Kar/zarar raporları
-    - [ ] Nakit akış raporları
-- [ ] Analitik dashboard
-  - [ ] Gerçek zamanlı istatistikler
-  - [ ] Grafik ve tablolar
-  - [ ] Özelleştirilebilir görünüm
+- [x] Raporlama sistemi
+  - [x] Satış raporları
+    - [x] Günlük/haftalık/aylık satış analizleri
+    - [x] Ürün bazlı satış raporları
+    - [x] Kategori bazlı satış raporları
+    - [x] Garson performans raporları
+  - [x] Müşteri analizleri
+    - [x] Müşteri segmentasyonu
+    - [x] Sadakat programı analizleri
+    - [x] Müşteri davranış analizleri
+  - [x] Rezervasyon analizleri
+    - [x] Doluluk oranları
+    - [x] İptal/No-show analizleri
+    - [x] Peak saat analizleri
+  - [x] Stok raporları
+    - [x] Stok tüketim analizleri
+    - [x] Tedarik önerileri
+    - [x] Fire raporları
+  - [x] Finansal raporlar
+    - [x] Gelir/gider analizleri
+    - [x] Kar/zarar raporları
+    - [x] Nakit akış raporları
+- [x] Analitik dashboard
+  - [x] Gerçek zamanlı istatistikler
+  - [x] Grafik ve tablolar
+  - [x] Özelleştirilebilir görünüm
 - [ ] Çoklu dil desteği
   - [ ] Türkçe
   - [ ] İngilizce
