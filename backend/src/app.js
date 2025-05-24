@@ -8,6 +8,12 @@ const { Server } = require('socket.io');
 const sequelize = require('./config/db');
 const SocketService = require('./services/socketService');
 const errorHandler = require('./middleware/errorHandler');
+const config = require('./config');
+const authRoutes = require('./routes/authRoutes');
+const tableRoutes = require('./routes/tableRoutes');
+const defineAssociations = require('./models/associations');
+const compression = require('compression');
+const morgan = require('morgan');
 
 // Load environment variables
 dotenv.config();
@@ -28,15 +34,20 @@ const io = new Server(httpServer, {
 const socketService = new SocketService(io);
 
 // Middleware
-app.use(cors());
 app.use(helmet());
+app.use(cors({
+  origin: config.corsOrigin,
+  credentials: true
+}));
+app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(morgan('dev'));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000, // 15 dakika
+  max: 100 // Her IP için 15 dakikada maksimum 100 istek
 });
 app.use(limiter);
 
@@ -53,6 +64,13 @@ sequelize.authenticate()
     console.error('Veritabanı bağlantı hatası:', err);
   });
 
+// Define model associations
+defineAssociations();
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/tables', tableRoutes);
+
 // Ana route
 app.get('/', (req, res) => {
   res.json({
@@ -63,14 +81,13 @@ app.get('/', (req, res) => {
 });
 
 // API Routes
-app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/tables', require('./routes/tableRoutes'));
 app.use('/api/categories', require('./routes/categoryRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/reservations', require('./routes/reservationRoutes'));
 app.use('/api/customers', require('./routes/customerRoutes'));
 app.use('/api/reports', require('./routes/reportRoutes'));
+app.use('/api/kitchen', require('./routes/kitchenRoutes'));
 
 // Error handling
 app.use(errorHandler);

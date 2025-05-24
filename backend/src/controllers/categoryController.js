@@ -1,49 +1,68 @@
 const Category = require('../models/Category');
-const { validationResult } = require('express-validator');
+const Product = require('../models/Product');
+const { ValidationError } = require('sequelize');
+const ApiError = require('../utils/ApiError');
 
 // @desc    Get all categories
 // @route   GET /api/categories
 // @access  Private
-exports.getCategories = async (req, res) => {
-  try {
-    const { tree } = req.query;
-    
-    let categories;
-    if (tree === 'true') {
-      categories = await Category.getCategoryTree();
-    } else {
-      categories = await Category.find()
-        .populate('parentCategory', 'name')
-        .populate('productsCount')
-        .sort('order');
-    }
-    
-    res.json(categories);
-  } catch (error) {
-    console.error('Get categories error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+exports.getAllCategories = async (req, res) => {
+  const { tree } = req.query;
+  
+  if (tree === 'true') {
+    const categoryTree = await Category.getTree();
+    return res.json(categoryTree);
   }
+
+  const categories = await Category.findAll({
+    include: [{
+      model: Category,
+      as: 'parent',
+      attributes: ['id', 'name']
+    }],
+    order: [['order', 'ASC']]
+  });
+
+  res.json(categories);
 };
 
 // @desc    Get category by ID
 // @route   GET /api/categories/:id
 // @access  Private
 exports.getCategoryById = async (req, res) => {
-  try {
-    const category = await Category.findById(req.params.id)
-      .populate('parentCategory', 'name')
-      .populate('subcategories')
-      .populate('productsCount');
+  const category = await Category.findByPk(req.params.id, {
+    include: [
+      {
+        model: Category,
+        as: 'parent',
+        attributes: ['id', 'name']
+      },
+      {
+        model: Category,
+        as: 'children',
+        attributes: ['id', 'name', 'order'],
+        where: { isActive: true },
+        required: false
+      },
+      {
+        model: Product,
+        where: { isActive: true },
+        required: false,
+        attributes: ['id', 'name', 'price', 'image']
+      }
+    ]
+  });
 
-    if (!category) {
-      return res.status(404).json({ message: 'Kategori bulunamadı' });
-    }
-
-    res.json(category);
-  } catch (error) {
-    console.error('Get category error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  if (!category) {
+    throw new ApiError(404, 'Kategori bulunamadı');
   }
+
+  // Kategori yolunu al
+  const fullPath = await category.getFullPath();
+  const response = category.toJSON();
+  response.fullPath = fullPath;
+
+  res.json(response);
 };
 
 // @desc    Create new category
@@ -51,45 +70,31 @@ exports.getCategoryById = async (req, res) => {
 // @access  Private (Admin only)
 exports.createCategory = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { name, description, parentCategory, order, color, image } = req.body;
-
-    // Check if category name already exists
-    const existingCategory = await Category.findOne({ name });
-    if (existingCategory) {
-      return res.status(400).json({ message: 'Bu kategori adı zaten kullanımda' });
-    }
-
-    // If parent category is provided, check if it exists
-    if (parentCategory) {
-      const parent = await Category.findById(parentCategory);
-      if (!parent) {
-        return res.status(400).json({ message: 'Üst kategori bulunamadı' });
+    // Eğer üst kategori varsa kontrol et
+    if (req.body.parentId) {
+      const parentCategory = await Category.findByPk(req.body.parentId);
+      if (!parentCategory) {
+        throw new ApiError(400, 'Üst kategori bulunamadı');
       }
     }
 
-    const category = new Category({
-      name,
-      description,
-      parentCategory: parentCategory || null,
-      order: order || 0,
-      color,
-      image
+    const category = await Category.create(req.body);
+    
+    // İlişkili verileri içeren kategoriyi döndür
+    const categoryWithRelations = await Category.findByPk(category.id, {
+      include: [{
+        model: Category,
+        as: 'parent',
+        attributes: ['id', 'name']
+      }]
     });
 
-    await category.save();
-
-    res.status(201).json({
-      message: 'Kategori başarıyla oluşturuldu',
-      category
-    });
+    res.status(201).json(categoryWithRelations);
   } catch (error) {
-    console.error('Create category error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    if (error instanceof ValidationError) {
+      throw new ApiError(400, 'Geçersiz kategori bilgileri', error.errors);
+    }
+    throw error;
   }
 };
 
@@ -97,67 +102,52 @@ exports.createCategory = async (req, res) => {
 // @route   PUT /api/categories/:id
 // @access  Private (Admin only)
 exports.updateCategory = async (req, res) => {
+  const category = await Category.findByPk(req.params.id);
+  
+  if (!category) {
+    throw new ApiError(404, 'Kategori bulunamadı');
+  }
+
+  // Kendisini kendi alt kategorisi yapmaya çalışıyor mu kontrol et
+  if (req.body.parentId && req.body.parentId === category.id) {
+    throw new ApiError(400, 'Kategori kendisinin alt kategorisi olamaz');
+  }
+
+  // Üst kategori değişiyorsa kontrol et
+  if (req.body.parentId && req.body.parentId !== category.parentId) {
+    const parentCategory = await Category.findByPk(req.body.parentId);
+    if (!parentCategory) {
+      throw new ApiError(400, 'Üst kategori bulunamadı');
+    }
+
+    // Döngüsel bağımlılık kontrolü
+    let currentParent = parentCategory;
+    while (currentParent) {
+      if (currentParent.id === category.id) {
+        throw new ApiError(400, 'Döngüsel kategori yapısı oluşturulamaz');
+      }
+      currentParent = await Category.findByPk(currentParent.parentId);
+    }
+  }
+
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { name, description, parentCategory, order, color, image, isActive } = req.body;
-    const category = await Category.findById(req.params.id);
-
-    if (!category) {
-      return res.status(404).json({ message: 'Kategori bulunamadı' });
-    }
-
-    // Check if new category name already exists
-    if (name && name !== category.name) {
-      const existingCategory = await Category.findOne({ name });
-      if (existingCategory) {
-        return res.status(400).json({ message: 'Bu kategori adı zaten kullanımda' });
-      }
-      category.name = name;
-    }
-
-    // Check if new parent category creates a cycle
-    if (parentCategory && parentCategory !== category.parentCategory?.toString()) {
-      const parent = await Category.findById(parentCategory);
-      if (!parent) {
-        return res.status(400).json({ message: 'Üst kategori bulunamadı' });
-      }
-      
-      // Check if the new parent is not a child of current category
-      let currentParent = parent;
-      while (currentParent) {
-        if (currentParent._id.toString() === category._id.toString()) {
-          return res.status(400).json({ message: 'Kategori döngüsü oluşturulamaz' });
-        }
-        currentParent = await Category.findById(currentParent.parentCategory);
-      }
-      
-      category.parentCategory = parentCategory;
-    }
-
-    if (description !== undefined) category.description = description;
-    if (order !== undefined) category.order = order;
-    if (color) category.color = color;
-    if (image !== undefined) category.image = image;
-    if (typeof isActive === 'boolean') category.isActive = isActive;
-
-    await category.save();
-
-    // Populate the response
-    await category.populate('parentCategory', 'name');
-    await category.populate('subcategories');
-    await category.populate('productsCount');
-
-    res.json({
-      message: 'Kategori başarıyla güncellendi',
-      category
+    await category.update(req.body);
+    
+    // İlişkili verileri içeren güncel kategoriyi döndür
+    const updatedCategory = await Category.findByPk(category.id, {
+      include: [{
+        model: Category,
+        as: 'parent',
+        attributes: ['id', 'name']
+      }]
     });
+
+    res.json(updatedCategory);
   } catch (error) {
-    console.error('Update category error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    if (error instanceof ValidationError) {
+      throw new ApiError(400, 'Geçersiz kategori bilgileri', error.errors);
+    }
+    throw error;
   }
 };
 
@@ -165,50 +155,56 @@ exports.updateCategory = async (req, res) => {
 // @route   DELETE /api/categories/:id
 // @access  Private (Admin only)
 exports.deleteCategory = async (req, res) => {
-  try {
-    const category = await Category.findById(req.params.id);
-
-    if (!category) {
-      return res.status(404).json({ message: 'Kategori bulunamadı' });
-    }
-
-    // Check if category has subcategories
-    const subcategories = await Category.countDocuments({ parentCategory: category._id });
-    if (subcategories > 0) {
-      return res.status(400).json({ message: 'Alt kategorileri olan bir kategori silinemez' });
-    }
-
-    await category.remove();
-
-    res.json({ message: 'Kategori başarıyla silindi' });
-  } catch (error) {
-    console.error('Delete category error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  const category = await Category.findByPk(req.params.id);
+  
+  if (!category) {
+    throw new ApiError(404, 'Kategori bulunamadı');
   }
+
+  // Alt kategorileri kontrol et
+  const children = await category.getChildren();
+  if (children.length > 0) {
+    throw new ApiError(400, 'Alt kategorileri olan kategori silinemez');
+  }
+
+  // Ürünleri kontrol et
+  const hasProducts = await category.hasProducts();
+  if (hasProducts) {
+    throw new ApiError(400, 'Ürünleri olan kategori silinemez');
+  }
+
+  await category.destroy();
+  res.status(204).send();
 };
 
 // @desc    Reorder categories
 // @route   PATCH /api/categories/reorder
 // @access  Private (Admin only)
 exports.reorderCategories = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { categories } = req.body;
-
-    // Update each category's order
-    const updatePromises = categories.map(({ id, order }) => 
-      Category.findByIdAndUpdate(id, { order }, { new: true })
-    );
-
-    await Promise.all(updatePromises);
-
-    res.json({ message: 'Kategoriler başarıyla yeniden sıralandı' });
-  } catch (error) {
-    console.error('Reorder categories error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  const { orders } = req.body;
+  
+  if (!Array.isArray(orders)) {
+    throw new ApiError(400, 'Geçersiz sıralama verisi');
   }
+
+  // Sıralama verilerini doğrula
+  for (const item of orders) {
+    if (!item.id || typeof item.order !== 'number') {
+      throw new ApiError(400, 'Geçersiz sıralama verisi');
+    }
+  }
+
+  // Toplu güncelleme yap
+  await Promise.all(
+    orders.map(({ id, order }) =>
+      Category.update({ order }, { where: { id } })
+    )
+  );
+
+  // Güncel kategori listesini döndür
+  const categories = await Category.findAll({
+    order: [['order', 'ASC']]
+  });
+
+  res.json(categories);
 }; 

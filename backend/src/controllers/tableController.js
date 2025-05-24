@@ -1,41 +1,73 @@
 const Table = require('../models/Table');
-const { validationResult } = require('express-validator');
-const QRCode = require('qrcode');
+const User = require('../models/User');
+const { ValidationError } = require('sequelize');
+const ApiError = require('../utils/ApiError');
+const { Op } = require('sequelize');
+const socketService = require('../services/socketService');
+const tableService = require('../services/tableService');
+const catchAsync = require('../utils/catchAsync');
+const { validateTableData } = require('../validations/tableValidation');
 
 // @desc    Get all tables
 // @route   GET /api/tables
 // @access  Private
-exports.getTables = async (req, res) => {
-  try {
-    const tables = await Table.find()
-      .populate('currentWaiter', 'username fullName')
-      .populate('currentOrder', 'status totalAmount');
-    
-    res.json(tables);
-  } catch (error) {
-    console.error('Get tables error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
-  }
+exports.getAllTables = async (req, res) => {
+  const { status, location } = req.query;
+  const where = {};
+  
+  if (status) where.status = status;
+  if (location) where.location = location;
+
+  const tables = await Table.findAll({
+    where,
+    include: [{
+      model: User,
+      as: 'currentWaiter',
+      attributes: ['id', 'name']
+    }],
+    order: [['number', 'ASC']]
+  });
+
+  res.json(tables);
 };
 
 // @desc    Get table by ID
 // @route   GET /api/tables/:id
 // @access  Private
 exports.getTableById = async (req, res) => {
-  try {
-    const table = await Table.findById(req.params.id)
-      .populate('currentWaiter', 'username fullName')
-      .populate('currentOrder', 'status totalAmount');
+  const table = await Table.findByPk(req.params.id, {
+    include: [{
+      model: User,
+      as: 'currentWaiter',
+      attributes: ['id', 'name']
+    }]
+  });
 
-    if (!table) {
-      return res.status(404).json({ message: 'Masa bulunamadı' });
-    }
-
-    res.json(table);
-  } catch (error) {
-    console.error('Get table error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  if (!table) {
+    throw new ApiError(404, 'Masa bulunamadı');
   }
+
+  res.json(table);
+};
+
+// @desc    Get table by QR
+// @route   GET /api/tables/qr/:qrCode
+// @access  Private
+exports.getTableByQR = async (req, res) => {
+  const table = await Table.findOne({
+    where: { qrCode: req.params.qrCode },
+    include: [{
+      model: User,
+      as: 'currentWaiter',
+      attributes: ['id', 'name']
+    }]
+  });
+
+  if (!table) {
+    throw new ApiError(404, 'Masa bulunamadı');
+  }
+
+  res.json(table);
 };
 
 // @desc    Create new table
@@ -43,43 +75,23 @@ exports.getTableById = async (req, res) => {
 // @access  Private (Admin only)
 exports.createTable = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    const table = await Table.create(req.body);
 
-    const { number, capacity, section } = req.body;
-
-    // Check if table number already exists
-    const existingTable = await Table.findOne({ number });
-    if (existingTable) {
-      return res.status(400).json({ message: 'Bu masa numarası zaten kullanımda' });
-    }
-
-    // Generate QR code
-    const qrData = JSON.stringify({
-      tableNumber: number,
-      section: section
-    });
-    
-    const qrCode = await QRCode.toDataURL(qrData);
-
-    const table = new Table({
-      number,
-      capacity,
-      section,
-      qrCode
+    // İlişkili verileri içeren masayı döndür
+    const tableWithRelations = await Table.findByPk(table.id, {
+      include: [{
+        model: User,
+        as: 'currentWaiter',
+        attributes: ['id', 'name']
+      }]
     });
 
-    await table.save();
-
-    res.status(201).json({
-      message: 'Masa başarıyla oluşturuldu',
-      table
-    });
+    res.status(201).json(tableWithRelations);
   } catch (error) {
-    console.error('Create table error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    if (error instanceof ValidationError) {
+      throw new ApiError(400, 'Geçersiz masa bilgileri', error.errors);
+    }
+    throw error;
   }
 };
 
@@ -87,50 +99,30 @@ exports.createTable = async (req, res) => {
 // @route   PUT /api/tables/:id
 // @access  Private (Admin only)
 exports.updateTable = async (req, res) => {
+  const table = await Table.findByPk(req.params.id);
+  
+  if (!table) {
+    throw new ApiError(404, 'Masa bulunamadı');
+  }
+
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    await table.update(req.body);
 
-    const { number, capacity, section, isActive } = req.body;
-    const table = await Table.findById(req.params.id);
-
-    if (!table) {
-      return res.status(404).json({ message: 'Masa bulunamadı' });
-    }
-
-    // Check if new table number already exists
-    if (number && number !== table.number) {
-      const existingTable = await Table.findOne({ number });
-      if (existingTable) {
-        return res.status(400).json({ message: 'Bu masa numarası zaten kullanımda' });
-      }
-      table.number = number;
-    }
-
-    if (capacity) table.capacity = capacity;
-    if (section) table.section = section;
-    if (typeof isActive === 'boolean') table.isActive = isActive;
-
-    // Update QR code if table number or section changed
-    if (number || section) {
-      const qrData = JSON.stringify({
-        tableNumber: number || table.number,
-        section: section || table.section
-      });
-      table.qrCode = await QRCode.toDataURL(qrData);
-    }
-
-    await table.save();
-
-    res.json({
-      message: 'Masa başarıyla güncellendi',
-      table
+    // İlişkili verileri içeren güncel masayı döndür
+    const updatedTable = await Table.findByPk(table.id, {
+      include: [{
+        model: User,
+        as: 'currentWaiter',
+        attributes: ['id', 'name']
+      }]
     });
+
+    res.json(updatedTable);
   } catch (error) {
-    console.error('Update table error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    if (error instanceof ValidationError) {
+      throw new ApiError(400, 'Geçersiz masa bilgileri', error.errors);
+    }
+    throw error;
   }
 };
 
@@ -138,118 +130,252 @@ exports.updateTable = async (req, res) => {
 // @route   DELETE /api/tables/:id
 // @access  Private (Admin only)
 exports.deleteTable = async (req, res) => {
-  try {
-    const table = await Table.findById(req.params.id);
-
-    if (!table) {
-      return res.status(404).json({ message: 'Masa bulunamadı' });
-    }
-
-    if (table.status !== 'empty') {
-      return res.status(400).json({ message: 'Dolu veya rezerve masa silinemez' });
-    }
-
-    await table.remove();
-
-    res.json({ message: 'Masa başarıyla silindi' });
-  } catch (error) {
-    console.error('Delete table error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  const table = await Table.findByPk(req.params.id);
+  
+  if (!table) {
+    throw new ApiError(404, 'Masa bulunamadı');
   }
+
+  await table.destroy();
+  res.status(204).send();
 };
 
 // @desc    Update table status
 // @route   PATCH /api/tables/:id/status
 // @access  Private
 exports.updateTableStatus = async (req, res) => {
+  const { status } = req.body;
+  const table = await Table.findByPk(req.params.id);
+  
+  if (!table) {
+    throw new ApiError(404, 'Masa bulunamadı');
+  }
+
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    await table.updateStatus(status);
 
-    const { status } = req.body;
-    const table = await Table.findById(req.params.id);
+    // Gerçek zamanlı bildirim gönder
+    socketService.notifyTableStatusUpdate(table.id, status, req.user.id);
 
-    if (!table) {
-      return res.status(404).json({ message: 'Masa bulunamadı' });
-    }
-
-    // Only allow status change if table is active
-    if (!table.isActive) {
-      return res.status(400).json({ message: 'Pasif masa durumu değiştirilemez' });
-    }
-
-    table.status = status;
-
-    // Clear waiter assignment if table becomes empty
-    if (status === 'empty') {
-      table.currentWaiter = null;
-      table.currentOrder = null;
-    }
-
-    // Assign waiter if table becomes occupied and no waiter assigned
-    if (status === 'occupied' && !table.currentWaiter) {
-      table.currentWaiter = req.user._id;
-    }
-
-    await table.save();
-
-    // Populate the response
-    await table.populate('currentWaiter', 'username fullName');
-    await table.populate('currentOrder', 'status totalAmount');
-
-    // Emit socket event for real-time updates
-    req.io.emit('table_status_changed', {
-      tableId: table._id,
-      status: table.status,
-      currentWaiter: table.currentWaiter
-    });
-
-    res.json({
-      message: 'Masa durumu güncellendi',
-      table
-    });
+    res.json(table);
   } catch (error) {
-    console.error('Update table status error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    throw new ApiError(400, error.message);
   }
 };
 
 // @desc    Assign waiter to table
 // @route   PATCH /api/tables/:id/assign
-// @access  Private (Admin & Waiter)
+// @access  Private (Admin, Manager only)
 exports.assignWaiter = async (req, res) => {
+  const { waiterId } = req.body;
+  const table = await Table.findByPk(req.params.id);
+  
+  if (!table) {
+    throw new ApiError(404, 'Masa bulunamadı');
+  }
+
+  // Garson kontrolü
+  const waiter = await User.findOne({
+    where: {
+      id: waiterId,
+      roles: {
+        [Op.contains]: ['waiter']
+      }
+    }
+  });
+
+  if (!waiter) {
+    throw new ApiError(400, 'Garson bulunamadı');
+  }
+
   try {
-    const table = await Table.findById(req.params.id);
-
-    if (!table) {
-      return res.status(404).json({ message: 'Masa bulunamadı' });
-    }
-
-    // Only allow assignment if table is active
-    if (!table.isActive) {
-      return res.status(400).json({ message: 'Pasif masaya garson atanamaz' });
-    }
-
-    table.currentWaiter = req.user._id;
+    table.currentWaiterId = waiterId;
     await table.save();
 
-    // Populate the response
-    await table.populate('currentWaiter', 'username fullName');
-
-    // Emit socket event for real-time updates
-    req.io.emit('table_waiter_assigned', {
-      tableId: table._id,
-      waiter: table.currentWaiter
+    // İlişkili verileri içeren güncel masayı döndür
+    const updatedTable = await Table.findByPk(table.id, {
+      include: [{
+        model: User,
+        as: 'currentWaiter',
+        attributes: ['id', 'name']
+      }]
     });
 
-    res.json({
-      message: 'Garson ataması yapıldı',
-      table
-    });
+    // Gerçek zamanlı bildirim gönder
+    socketService.notifyTableAssigned(table.id, waiterId);
+
+    res.json(updatedTable);
   } catch (error) {
-    console.error('Assign waiter error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    throw new ApiError(400, error.message);
   }
-}; 
+};
+
+// @desc    Get available tables
+// @route   GET /api/tables/available
+// @access  Private
+exports.getAvailableTables = async (req, res) => {
+  const { capacity, location } = req.query;
+  const where = {
+    status: 'available',
+    isActive: true
+  };
+
+  if (capacity) where.capacity = { [Op.gte]: parseInt(capacity) };
+  if (location) where.location = location;
+
+  const tables = await Table.findAll({
+    where,
+    order: [['number', 'ASC']]
+  });
+
+  res.json(tables);
+};
+
+const tableController = {
+  /**
+   * GET /api/tables
+   * Tüm masaları listele
+   */
+  getTables: catchAsync(async (req, res) => {
+    const filters = {
+      status: req.query.status,
+      section: req.query.section,
+      floor: req.query.floor ? parseInt(req.query.floor) : undefined,
+      capacity: req.query.capacity ? parseInt(req.query.capacity) : undefined,
+      waiterId: req.query.waiterId ? parseInt(req.query.waiterId) : undefined
+    };
+
+    const tables = await tableService.getTables(filters);
+    res.json(tables);
+  }),
+
+  /**
+   * GET /api/tables/:id
+   * Masa detayını getir
+   */
+  getTableById: catchAsync(async (req, res) => {
+    const tableId = parseInt(req.params.id);
+    const table = await tableService.getTableById(tableId);
+    res.json(table);
+  }),
+
+  /**
+   * POST /api/tables
+   * Yeni masa oluştur
+   */
+  createTable: catchAsync(async (req, res) => {
+    const tableData = await validateTableData(req.body);
+    const table = await tableService.createTable(tableData);
+    res.status(201).json(table);
+  }),
+
+  /**
+   * PUT /api/tables/:id
+   * Masa güncelle
+   */
+  updateTable: catchAsync(async (req, res) => {
+    const tableId = parseInt(req.params.id);
+    const updateData = await validateTableData(req.body, true);
+    const table = await tableService.updateTable(tableId, updateData);
+    res.json(table);
+  }),
+
+  /**
+   * DELETE /api/tables/:id
+   * Masa sil
+   */
+  deleteTable: catchAsync(async (req, res) => {
+    const tableId = parseInt(req.params.id);
+    await tableService.deleteTable(tableId);
+    res.status(204).send();
+  }),
+
+  /**
+   * PATCH /api/tables/:id/status
+   * Masa durumunu güncelle
+   */
+  updateTableStatus: catchAsync(async (req, res) => {
+    const tableId = parseInt(req.params.id);
+    const { status, waiterId } = req.body;
+
+    if (!status) {
+      throw new ApiError(400, 'Durum belirtilmedi');
+    }
+
+    const table = await tableService.updateTableStatus(
+      tableId,
+      status,
+      waiterId ? parseInt(waiterId) : null
+    );
+    res.json(table);
+  }),
+
+  /**
+   * POST /api/tables/:id/waiter
+   * Masaya garson ata
+   */
+  assignWaiter: catchAsync(async (req, res) => {
+    const tableId = parseInt(req.params.id);
+    const { waiterId } = req.body;
+
+    if (!waiterId) {
+      throw new ApiError(400, 'Garson ID belirtilmedi');
+    }
+
+    const table = await tableService.assignWaiter(tableId, parseInt(waiterId));
+    res.json(table);
+  }),
+
+  /**
+   * DELETE /api/tables/:id/waiter
+   * Masadan garson kaldır
+   */
+  removeWaiter: catchAsync(async (req, res) => {
+    const tableId = parseInt(req.params.id);
+    const table = await tableService.removeWaiter(tableId);
+    res.json(table);
+  }),
+
+  /**
+   * POST /api/tables/:id/qr-code
+   * Yeni QR kod oluştur
+   */
+  regenerateQRCode: catchAsync(async (req, res) => {
+    const tableId = parseInt(req.params.id);
+    const qrCode = await tableService.regenerateQRCode(tableId);
+    res.json({ qrCode });
+  }),
+
+  /**
+   * POST /api/tables/:id/verify-qr
+   * QR kod doğrula
+   */
+  verifyQRCode: catchAsync(async (req, res) => {
+    const tableId = parseInt(req.params.id);
+    const { secret } = req.body;
+
+    if (!secret) {
+      throw new ApiError(400, 'QR kod secret belirtilmedi');
+    }
+
+    const isValid = await tableService.verifyQRCode(tableId, secret);
+    res.json({ isValid });
+  }),
+
+  /**
+   * GET /api/tables/available
+   * Müsait masaları getir
+   */
+  getAvailableTables: catchAsync(async (req, res) => {
+    const filters = {
+      capacity: req.query.capacity ? parseInt(req.query.capacity) : undefined,
+      section: req.query.section,
+      floor: req.query.floor ? parseInt(req.query.floor) : undefined
+    };
+
+    const tables = await tableService.getAvailableTables(filters);
+    res.json(tables);
+  })
+};
+
+module.exports = tableController; 

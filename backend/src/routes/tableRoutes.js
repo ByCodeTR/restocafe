@@ -1,59 +1,102 @@
 const express = require('express');
-const { body } = require('express-validator');
 const router = express.Router();
-const { auth, authorize } = require('../middleware/auth');
-const {
-  getTables,
-  getTableById,
-  createTable,
-  updateTable,
-  deleteTable,
-  updateTableStatus,
-  assignWaiter
-} = require('../controllers/tableController');
+const { body } = require('express-validator');
+const tableController = require('../controllers/tableController');
+const auth = require('../middleware/auth');
+const validate = require('../middleware/validate');
+const checkRole = require('../middleware/checkRole');
 
-// Validation middleware
+// Validation rules
 const tableValidation = [
-  body('number')
-    .isInt({ min: 1 })
-    .withMessage('Masa numarası 1\'den büyük bir tam sayı olmalıdır'),
-  body('capacity')
-    .isInt({ min: 1 })
-    .withMessage('Masa kapasitesi 1\'den büyük bir tam sayı olmalıdır'),
-  body('section')
-    .trim()
-    .notEmpty()
-    .withMessage('Masa bölümü zorunludur')
+  body('number').notEmpty().withMessage('Masa numarası gerekli'),
+  body('capacity').isInt({ min: 1, max: 20 }).withMessage('Kapasite 1-20 arası olmalı'),
+  body('location').optional().isString().withMessage('Geçersiz konum'),
+  body('isActive').optional().isBoolean().withMessage('Geçersiz aktiflik durumu')
 ];
 
 const statusValidation = [
   body('status')
-    .isIn(['empty', 'occupied', 'reserved', 'cleaning'])
+    .isIn(['available', 'occupied', 'reserved', 'maintenance'])
     .withMessage('Geçersiz masa durumu')
 ];
 
-// Routes
-router.get('/', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+const waiterValidation = [
+  body('waiterId').isInt().withMessage('Geçersiz garson ID')
+];
 
-router.post('/', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+// Public routes
+router.get('/available', tableController.getAvailableTables);
 
-router.get('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+// Protected routes
+router.use(auth);
 
-router.put('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+// Tüm masaları listele (Tüm personel)
+router.get('/', tableController.getTables);
 
-router.delete('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+// Masa detayı (Tüm personel)
+router.get('/:id', tableController.getTableById);
 
-router.patch('/:id/status', [auth, ...statusValidation], updateTableStatus);
-router.patch('/:id/assign', [auth, authorize('admin', 'waiter')], assignWaiter);
+// Masa oluştur (Admin)
+router.post(
+  '/',
+  checkRole(['admin']),
+  tableValidation,
+  validate,
+  tableController.createTable
+);
+
+// Masa güncelle (Admin)
+router.put(
+  '/:id',
+  checkRole(['admin']),
+  tableValidation,
+  validate,
+  tableController.updateTable
+);
+
+// Masa sil (Admin)
+router.delete(
+  '/:id',
+  checkRole(['admin']),
+  tableController.deleteTable
+);
+
+// Masa durumu güncelle (Garson, Admin)
+router.patch(
+  '/:id/status',
+  checkRole(['waiter', 'admin']),
+  statusValidation,
+  validate,
+  tableController.updateTableStatus
+);
+
+// Masaya garson ata (Admin, Manager)
+router.post(
+  '/:id/waiter',
+  checkRole(['admin', 'manager']),
+  waiterValidation,
+  validate,
+  tableController.assignWaiter
+);
+
+// Masadan garson kaldır (Admin, Manager)
+router.delete(
+  '/:id/waiter',
+  checkRole(['admin', 'manager']),
+  tableController.removeWaiter
+);
+
+// QR kod yenile (Admin)
+router.post(
+  '/:id/qr-code',
+  checkRole(['admin']),
+  tableController.regenerateQRCode
+);
+
+// QR kod doğrula (Tüm personel)
+router.post(
+  '/:id/verify-qr',
+  tableController.verifyQRCode
+);
 
 module.exports = router; 

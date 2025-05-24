@@ -1,80 +1,72 @@
 const express = require('express');
-const { body } = require('express-validator');
 const router = express.Router();
-const { auth, authorize } = require('../middleware/auth');
-const {
-  getCategories,
-  getCategoryById,
-  createCategory,
-  updateCategory,
-  deleteCategory,
-  reorderCategories
-} = require('../controllers/categoryController');
+const { body } = require('express-validator');
+const categoryController = require('../controllers/categoryController');
+const auth = require('../middleware/auth');
+const validate = require('../middleware/validate');
+const checkRole = require('../middleware/checkRole');
 
-// Validation middleware
+// Validation rules
 const categoryValidation = [
   body('name')
-    .trim()
-    .notEmpty()
-    .withMessage('Kategori adı zorunludur')
-    .isLength({ min: 2 })
-    .withMessage('Kategori adı en az 2 karakter olmalıdır'),
+    .notEmpty().withMessage('Kategori adı gerekli')
+    .isLength({ min: 2, max: 50 }).withMessage('Kategori adı 2-50 karakter arası olmalı'),
   body('description')
     .optional()
-    .trim(),
-  body('parentCategory')
+    .isLength({ max: 500 }).withMessage('Açıklama en fazla 500 karakter olabilir'),
+  body('parentId')
     .optional()
-    .isMongoId()
-    .withMessage('Geçersiz üst kategori ID'),
+    .isInt().withMessage('Geçersiz üst kategori ID'),
   body('order')
     .optional()
-    .isInt({ min: 0 })
-    .withMessage('Sıralama değeri 0 veya daha büyük olmalıdır'),
-  body('color')
+    .isInt().withMessage('Geçersiz sıralama değeri'),
+  body('isActive')
     .optional()
-    .matches(/^#[0-9A-Fa-f]{6}$/)
-    .withMessage('Geçersiz renk kodu (örn: #FF0000)'),
-  body('image')
-    .optional()
-    .isURL()
-    .withMessage('Geçersiz resim URL')
+    .isBoolean().withMessage('Geçersiz aktiflik durumu')
 ];
 
 const reorderValidation = [
-  body('categories')
-    .isArray()
-    .withMessage('Kategoriler listesi gereklidir')
-    .notEmpty()
-    .withMessage('Kategoriler listesi boş olamaz'),
-  body('categories.*.id')
-    .isMongoId()
-    .withMessage('Geçersiz kategori ID'),
-  body('categories.*.order')
-    .isInt({ min: 0 })
-    .withMessage('Sıralama değeri 0 veya daha büyük olmalıdır')
+  body('orders')
+    .isArray().withMessage('Sıralama verisi dizi olmalı')
+    .notEmpty().withMessage('Sıralama verisi gerekli'),
+  body('orders.*.id')
+    .isInt().withMessage('Geçersiz kategori ID'),
+  body('orders.*.order')
+    .isInt().withMessage('Geçersiz sıralama değeri')
 ];
 
 // Routes
-router.get('/', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.get('/', auth, categoryController.getAllCategories);
+router.get('/:id', auth, categoryController.getCategoryById);
 
-router.post('/', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.post('/',
+  auth,
+  checkRole(['admin']),
+  categoryValidation,
+  validate,
+  categoryController.createCategory
+);
 
-router.get('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.put('/:id',
+  auth,
+  checkRole(['admin']),
+  categoryValidation,
+  validate,
+  categoryController.updateCategory
+);
 
-router.put('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.delete('/:id',
+  auth,
+  checkRole(['admin']),
+  categoryController.deleteCategory
+);
 
-router.delete('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
-
-router.patch('/reorder', [auth, authorize('admin'), ...reorderValidation], reorderCategories);
+router.patch('/reorder',
+  auth,
+  checkRole(['admin']),
+  reorderValidation,
+  validate,
+  categoryController.reorderCategories
+);
 
 module.exports = router; 

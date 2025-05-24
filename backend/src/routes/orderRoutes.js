@@ -1,111 +1,113 @@
 const express = require('express');
-const { body } = require('express-validator');
 const router = express.Router();
-const { auth, authorize } = require('../middleware/auth');
-const {
-  getOrders,
-  getOrderById,
-  createOrder,
-  updateOrderItemStatus,
-  addPayment,
-  cancelOrder,
-  getDailyOrdersSummary
-} = require('../controllers/orderController');
+const { body } = require('express-validator');
+const orderController = require('../controllers/orderController');
+const auth = require('../middleware/auth');
+const validate = require('../middleware/validate');
+const checkRole = require('../middleware/checkRole');
 
-// Validation middleware
+// Validation rules
 const orderValidation = [
-  body('table')
-    .isMongoId()
-    .withMessage('Geçersiz masa ID'),
+  body('tableId')
+    .isInt().withMessage('Geçersiz masa ID'),
+  body('customerId')
+    .optional()
+    .isInt().withMessage('Geçersiz müşteri ID'),
+  body('note')
+    .optional()
+    .isString().withMessage('Geçersiz not'),
   body('items')
-    .isArray({ min: 1 })
-    .withMessage('En az bir ürün seçilmelidir'),
-  body('items.*.product')
-    .isMongoId()
-    .withMessage('Geçersiz ürün ID'),
+    .isArray().withMessage('Ürünler dizi olmalı')
+    .notEmpty().withMessage('En az bir ürün gerekli'),
+  body('items.*.productId')
+    .isInt().withMessage('Geçersiz ürün ID'),
   body('items.*.quantity')
-    .isInt({ min: 1 })
-    .withMessage('Miktar en az 1 olmalıdır'),
-  body('items.*.variations')
+    .isInt({ min: 1 }).withMessage('Miktar 1 veya daha büyük olmalı'),
+  body('items.*.note')
     .optional()
-    .isArray()
-    .withMessage('Varyasyonlar dizi olmalıdır'),
-  body('items.*.variations.*.name')
+    .isString().withMessage('Geçersiz ürün notu'),
+  body('items.*.options')
     .optional()
-    .trim()
-    .notEmpty()
-    .withMessage('Varyasyon adı zorunludur'),
-  body('items.*.variations.*.option.name')
+    .isObject().withMessage('Geçersiz ürün seçenekleri')
+];
+
+const orderUpdateValidation = [
+  body('note')
     .optional()
-    .trim()
-    .notEmpty()
-    .withMessage('Seçenek adı zorunludur'),
-  body('customer.name')
+    .isString().withMessage('Geçersiz not'),
+  body('items')
+    .isArray().withMessage('Ürünler dizi olmalı')
+    .notEmpty().withMessage('En az bir ürün gerekli'),
+  body('items.*.id')
     .optional()
-    .trim()
-    .isLength({ min: 2 })
-    .withMessage('Müşteri adı en az 2 karakter olmalıdır'),
-  body('customer.notes')
+    .isInt().withMessage('Geçersiz ürün kalemi ID'),
+  body('items.*.productId')
     .optional()
-    .trim()
+    .isInt().withMessage('Geçersiz ürün ID'),
+  body('items.*.quantity')
+    .isInt({ min: 0 }).withMessage('Miktar 0 veya daha büyük olmalı'),
+  body('items.*.note')
+    .optional()
+    .isString().withMessage('Geçersiz ürün notu'),
+  body('items.*.options')
+    .optional()
+    .isObject().withMessage('Geçersiz ürün seçenekleri')
 ];
 
 const statusValidation = [
   body('status')
-    .isIn(['pending', 'preparing', 'ready', 'served', 'cancelled'])
-    .withMessage('Geçersiz durum')
+    .isIn(['pending', 'preparing', 'ready', 'served', 'completed', 'cancelled'])
+    .withMessage('Geçersiz sipariş durumu')
 ];
 
 const paymentValidation = [
   body('amount')
-    .isFloat({ min: 0.01 })
-    .withMessage('Geçersiz ödeme tutarı'),
+    .isFloat({ min: 0.01 }).withMessage('Geçersiz ödeme tutarı'),
   body('method')
-    .isIn(['cash', 'credit_card', 'debit_card', 'mobile'])
-    .withMessage('Geçersiz ödeme yöntemi'),
-  body('transactionId')
-    .optional()
-    .trim()
-    .notEmpty()
-    .withMessage('İşlem ID boş olamaz')
+    .isIn(['cash', 'credit_card', 'debit_card', 'mobile_payment'])
+    .withMessage('Geçersiz ödeme yöntemi')
 ];
 
 // Routes
-router.get('/', auth, getOrders);
-router.get('/summary/daily', [auth, authorize('admin', 'manager')], getDailyOrdersSummary);
-router.get('/:id', auth, getOrderById);
-router.post('/', [auth, authorize('waiter', 'admin'), ...orderValidation], createOrder);
-router.patch('/:id/items/:itemId/status', [auth, authorize('waiter', 'kitchen', 'admin'), ...statusValidation], updateOrderItemStatus);
-router.post('/:id/payments', [auth, authorize('waiter', 'cashier', 'admin'), ...paymentValidation], addPayment);
-router.patch('/:id/cancel', [auth, authorize('waiter', 'admin')], cancelOrder);
+router.get('/', auth, orderController.getAllOrders);
+router.get('/:id', auth, orderController.getOrderById);
 
-// Geçici olarak boş rotalar
-router.get('/', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.post('/',
+  auth,
+  checkRole(['waiter']),
+  orderValidation,
+  validate,
+  orderController.createOrder
+);
 
-router.post('/', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.put('/:id',
+  auth,
+  checkRole(['waiter']),
+  orderUpdateValidation,
+  validate,
+  orderController.updateOrder
+);
 
-router.get('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.delete('/:id',
+  auth,
+  checkRole(['admin']),
+  orderController.deleteOrder
+);
 
-router.put('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.patch('/:id/status',
+  auth,
+  checkRole(['admin', 'waiter', 'kitchen']),
+  statusValidation,
+  validate,
+  orderController.updateOrderStatus
+);
 
-router.delete('/:id', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
-
-router.patch('/:id/status', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
-
-router.post('/:id/payment', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
+router.post('/:id/payments',
+  auth,
+  checkRole(['cashier']),
+  paymentValidation,
+  validate,
+  orderController.addPayment
+);
 
 module.exports = router; 

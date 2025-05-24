@@ -1,100 +1,115 @@
 const express = require('express');
-const { body } = require('express-validator');
 const router = express.Router();
-const { auth, authorize } = require('../middleware/auth');
-const {
-  getProducts,
-  getProductById,
-  createProduct,
-  updateProduct,
-  deleteProduct,
-  updateStock,
-  getLowStockProducts
-} = require('../controllers/productController');
+const { body } = require('express-validator');
+const productController = require('../controllers/productController');
+const auth = require('../middleware/auth');
+const validate = require('../middleware/validate');
+const checkRole = require('../middleware/checkRole');
 
-// Validation middleware
+// Validation rules
 const productValidation = [
   body('name')
-    .trim()
-    .notEmpty()
-    .withMessage('Ürün adı zorunludur')
-    .isLength({ min: 2 })
-    .withMessage('Ürün adı en az 2 karakter olmalıdır'),
-  body('category')
-    .isMongoId()
-    .withMessage('Geçersiz kategori ID'),
-  body('basePrice')
-    .isFloat({ min: 0 })
-    .withMessage('Fiyat 0\'dan büyük bir sayı olmalıdır'),
-  body('variations.*.name')
+    .notEmpty().withMessage('Ürün adı gerekli')
+    .isLength({ min: 2, max: 100 }).withMessage('Ürün adı 2-100 karakter arası olmalı'),
+  body('description')
     .optional()
-    .trim()
-    .notEmpty()
-    .withMessage('Varyasyon adı zorunludur'),
-  body('variations.*.options.*.name')
+    .isLength({ max: 1000 }).withMessage('Açıklama en fazla 1000 karakter olabilir'),
+  body('price')
+    .isFloat({ min: 0 }).withMessage('Geçersiz fiyat'),
+  body('discountedPrice')
     .optional()
-    .trim()
-    .notEmpty()
-    .withMessage('Seçenek adı zorunludur'),
-  body('variations.*.options.*.price')
-    .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Seçenek fiyatı 0\'dan büyük bir sayı olmalıdır'),
-  body('images.*')
-    .optional()
-    .isURL()
-    .withMessage('Geçersiz resim URL'),
-  body('currentStock')
-    .optional()
-    .isInt({ min: 0 })
-    .withMessage('Stok miktarı 0\'dan küçük olamaz'),
-  body('minStock')
-    .optional()
-    .isInt({ min: 0 })
-    .withMessage('Minimum stok miktarı 0\'dan küçük olamaz'),
+    .isFloat({ min: 0 }).withMessage('Geçersiz indirimli fiyat')
+    .custom((value, { req }) => {
+      if (value >= req.body.price) {
+        throw new Error('İndirimli fiyat normal fiyattan yüksek olamaz');
+      }
+      return true;
+    }),
+  body('stock')
+    .isInt({ min: 0 }).withMessage('Geçersiz stok miktarı'),
+  body('unit')
+    .notEmpty().withMessage('Birim gerekli'),
   body('preparationTime')
     .optional()
-    .isInt({ min: 0 })
-    .withMessage('Hazırlama süresi 0\'dan küçük olamaz'),
-  body('code')
+    .isInt({ min: 0 }).withMessage('Geçersiz hazırlama süresi'),
+  body('calories')
     .optional()
-    .trim()
-    .matches(/^[A-Za-z0-9-_]+$/)
-    .withMessage('Ürün kodu sadece harf, rakam, tire ve alt çizgi içerebilir'),
-  body('nutritionalInfo.calories')
+    .isInt({ min: 0 }).withMessage('Geçersiz kalori değeri'),
+  body('spicyLevel')
     .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Kalori değeri 0\'dan büyük bir sayı olmalıdır'),
-  body('nutritionalInfo.protein')
+    .isInt({ min: 0, max: 5 }).withMessage('Acılık seviyesi 0-5 arası olmalı'),
+  body('categoryId')
+    .isInt().withMessage('Geçersiz kategori'),
+  body('parentId')
     .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Protein değeri 0\'dan büyük bir sayı olmalıdır'),
-  body('nutritionalInfo.carbohydrates')
+    .isInt().withMessage('Geçersiz ana ürün'),
+  body('isVegetarian')
     .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Karbonhidrat değeri 0\'dan büyük bir sayı olmalıdır'),
-  body('nutritionalInfo.fat')
+    .isBoolean().withMessage('Geçersiz vejetaryen değeri'),
+  body('isVegan')
     .optional()
-    .isFloat({ min: 0 })
-    .withMessage('Yağ değeri 0\'dan büyük bir sayı olmalıdır')
+    .isBoolean().withMessage('Geçersiz vegan değeri'),
+  body('isGlutenFree')
+    .optional()
+    .isBoolean().withMessage('Geçersiz gluten içermez değeri'),
+  body('isActive')
+    .optional()
+    .isBoolean().withMessage('Geçersiz aktiflik durumu'),
+  body('isAvailable')
+    .optional()
+    .isBoolean().withMessage('Geçersiz kullanılabilirlik durumu')
 ];
 
 const stockValidation = [
-  body('quantity')
-    .isInt({ min: 1 })
-    .withMessage('Miktar 1\'den büyük bir tam sayı olmalıdır'),
-  body('type')
-    .isIn(['add', 'remove'])
-    .withMessage('Geçersiz işlem tipi')
+  body('stock')
+    .isInt({ min: 0 }).withMessage('Geçersiz stok miktarı')
+];
+
+const availabilityValidation = [
+  body('isAvailable')
+    .isBoolean().withMessage('Geçersiz kullanılabilirlik değeri')
 ];
 
 // Routes
-router.get('/', auth, getProducts);
-router.get('/low-stock', [auth, authorize('admin', 'kitchen')], getLowStockProducts);
-router.get('/:id', auth, getProductById);
-router.post('/', [auth, authorize('admin'), ...productValidation], createProduct);
-router.put('/:id', [auth, authorize('admin'), ...productValidation], updateProduct);
-router.delete('/:id', [auth, authorize('admin')], deleteProduct);
-router.patch('/:id/stock', [auth, authorize('admin', 'kitchen'), ...stockValidation], updateStock);
+router.get('/', auth, productController.getAllProducts);
+router.get('/:id', auth, productController.getProductById);
+
+router.post('/',
+  auth,
+  checkRole(['admin']),
+  productValidation,
+  validate,
+  productController.createProduct
+);
+
+router.put('/:id',
+  auth,
+  checkRole(['admin']),
+  productValidation,
+  validate,
+  productController.updateProduct
+);
+
+router.delete('/:id',
+  auth,
+  checkRole(['admin']),
+  productController.deleteProduct
+);
+
+router.patch('/:id/stock',
+  auth,
+  checkRole(['admin', 'kitchen']),
+  stockValidation,
+  validate,
+  productController.updateStock
+);
+
+router.patch('/:id/availability',
+  auth,
+  checkRole(['admin', 'kitchen']),
+  availabilityValidation,
+  validate,
+  productController.updateAvailability
+);
 
 module.exports = router; 

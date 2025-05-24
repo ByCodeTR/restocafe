@@ -1,32 +1,40 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const ApiError = require('../utils/ApiError');
 
+/**
+ * JWT token doğrulama middleware'i
+ */
 const auth = async (req, res, next) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
-    
+
     if (!token) {
-      return res.status(401).json({
-        status: 'error',
-        message: 'Authentication required'
-      });
+      throw new ApiError(401, 'Yetkilendirme token\'ı bulunamadı');
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findByPk(decoded.id);
 
-    if (!user || !user.isActive) {
-      throw new Error();
+    if (!user) {
+      throw new ApiError(401, 'Geçersiz token');
     }
 
-    req.token = token;
+    if (!user.isActive) {
+      throw new ApiError(401, 'Hesabınız devre dışı bırakılmış');
+    }
+
     req.user = user;
+    req.token = token;
     next();
   } catch (error) {
-    res.status(401).json({
-      status: 'error',
-      message: 'Please authenticate'
-    });
+    if (error.name === 'JsonWebTokenError') {
+      next(new ApiError(401, 'Geçersiz token'));
+    } else if (error.name === 'TokenExpiredError') {
+      next(new ApiError(401, 'Token süresi dolmuş'));
+    } else {
+      next(error);
+    }
   }
 };
 

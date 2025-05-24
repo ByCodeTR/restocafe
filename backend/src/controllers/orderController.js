@@ -1,324 +1,379 @@
 const Order = require('../models/Order');
+const OrderItem = require('../models/OrderItem');
 const Table = require('../models/Table');
+const User = require('../models/User');
 const Product = require('../models/Product');
-const { validationResult } = require('express-validator');
-let socketService;
+const { ValidationError, Op } = require('sequelize');
+const ApiError = require('../utils/ApiError');
+const socketService = require('../services/socketService');
 
-// Socket service setter
-exports.setSocketService = (service) => {
-  socketService = service;
-};
-
-// @desc    Get all orders with filters
+// @desc    Get all orders
 // @route   GET /api/orders
 // @access  Private
-exports.getOrders = async (req, res) => {
-  try {
-    const {
-      status,
-      table,
-      waiter,
-      startDate,
-      endDate,
-      paymentStatus,
-      page = 1,
-      limit = 10
-    } = req.query;
+exports.getAllOrders = async (req, res) => {
+  const {
+    status,
+    tableId,
+    waiterId,
+    customerId,
+    startDate,
+    endDate,
+    paymentStatus,
+    page = 1,
+    limit = 10,
+    sortBy = 'createdAt',
+    sortOrder = 'DESC'
+  } = req.query;
 
-    // Build query
-    const query = {};
-    
-    if (status) query.status = status;
-    if (table) query.table = table;
-    if (waiter) query.waiter = waiter;
-    if (paymentStatus) query.paymentStatus = paymentStatus;
-    
-    if (startDate || endDate) {
-      query.createdAt = {};
-      if (startDate) query.createdAt.$gte = new Date(startDate);
-      if (endDate) query.createdAt.$lte = new Date(endDate);
-    }
-
-    // Execute query with pagination
-    const skip = (page - 1) * limit;
-    
-    const [orders, total] = await Promise.all([
-      Order.find(query)
-        .populate('table', 'name number')
-        .populate('waiter', 'name')
-        .populate('items.product', 'name code')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      Order.countDocuments(query)
-    ]);
-
-    res.json({
-      orders,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Get orders error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  // Filtreleme koşulları
+  const where = {};
+  
+  if (status) where.status = status;
+  if (tableId) where.tableId = tableId;
+  if (waiterId) where.waiterId = waiterId;
+  if (customerId) where.customerId = customerId;
+  if (paymentStatus) where.paymentStatus = paymentStatus;
+  if (startDate || endDate) {
+    where.createdAt = {};
+    if (startDate) where.createdAt[Op.gte] = new Date(startDate);
+    if (endDate) where.createdAt[Op.lte] = new Date(endDate);
   }
+
+  // Sayfalama
+  const offset = (page - 1) * limit;
+  
+  // Sıralama
+  const order = [[sortBy, sortOrder]];
+
+  const { count, rows: orders } = await Order.findAndCountAll({
+    where,
+    include: [
+      {
+        model: User,
+        as: 'waiter',
+        attributes: ['id', 'name']
+      },
+      {
+        model: User,
+        as: 'customer',
+        attributes: ['id', 'name'],
+        required: false
+      },
+      {
+        model: Table,
+        attributes: ['id', 'number']
+      },
+      {
+        model: OrderItem,
+        as: 'orderItems',
+        include: [{
+          model: Product,
+          attributes: ['id', 'name']
+        }]
+      }
+    ],
+    order,
+    offset,
+    limit: parseInt(limit)
+  });
+
+  res.json({
+    orders,
+    currentPage: parseInt(page),
+    totalPages: Math.ceil(count / limit),
+    totalItems: count
+  });
 };
 
 // @desc    Get order by ID
 // @route   GET /api/orders/:id
 // @access  Private
 exports.getOrderById = async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-      .populate('table', 'name number')
-      .populate('waiter', 'name')
-      .populate('items.product', 'name code price');
+  const order = await Order.findByPk(req.params.id, {
+    include: [
+      {
+        model: User,
+        as: 'waiter',
+        attributes: ['id', 'name']
+      },
+      {
+        model: User,
+        as: 'customer',
+        attributes: ['id', 'name'],
+        required: false
+      },
+      {
+        model: Table,
+        attributes: ['id', 'number']
+      },
+      {
+        model: OrderItem,
+        as: 'orderItems',
+        include: [{
+          model: Product,
+          attributes: ['id', 'name', 'price', 'image']
+        }]
+      }
+    ]
+  });
 
-    if (!order) {
-      return res.status(404).json({ message: 'Sipariş bulunamadı' });
-    }
-
-    res.json(order);
-  } catch (error) {
-    console.error('Get order error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  if (!order) {
+    throw new ApiError(404, 'Sipariş bulunamadı');
   }
+
+  res.json(order);
 };
 
 // @desc    Create new order
 // @route   POST /api/orders
-// @access  Private
+// @access  Private (Waiter only)
 exports.createOrder = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    const { tableId, customerId, items, note } = req.body;
 
-    const { table: tableId, items, customer } = req.body;
-
-    // Check if table exists and is available
-    const table = await Table.findById(tableId);
+    // Masa kontrolü
+    const table = await Table.findByPk(tableId);
     if (!table) {
-      return res.status(400).json({ message: 'Masa bulunamadı' });
-    }
-    if (table.status === 'reserved' && table.reservedFor > new Date()) {
-      return res.status(400).json({ message: 'Masa rezerve edilmiş' });
+      throw new ApiError(400, 'Masa bulunamadı');
     }
 
-    // Calculate total amount and validate products
-    let totalAmount = 0;
-    const processedItems = [];
-
-    for (const item of items) {
-      const product = await Product.findById(item.product);
-      if (!product) {
-        return res.status(400).json({ message: `Ürün bulunamadı: ${item.product}` });
-      }
-
-      // Check stock if tracking is enabled
-      if (product.stockTracking && product.currentStock < item.quantity) {
-        return res.status(400).json({ 
-          message: `Yetersiz stok: ${product.name}`,
-          currentStock: product.currentStock
-        });
-      }
-
-      // Calculate item price with variations
-      let itemPrice = product.basePrice;
-      if (item.variations) {
-        for (const variation of item.variations) {
-          const productVariation = product.variations.find(v => v.name === variation.name);
-          if (!productVariation) continue;
-
-          const option = productVariation.options.find(o => o.name === variation.option.name);
-          if (!option) continue;
-
-          itemPrice += option.price;
-        }
-      }
-
-      totalAmount += itemPrice * item.quantity;
-      processedItems.push({
-        ...item,
-        price: itemPrice
-      });
-
-      // Update stock if tracking is enabled
-      if (product.stockTracking) {
-        await product.updateStock(item.quantity, 'remove');
-        
-        // Check if stock is low after update
-        if (product.currentStock <= product.minStock) {
-          socketService?.notifyLowStock(product);
-        }
+    // Müşteri kontrolü
+    if (customerId) {
+      const customer = await User.findByPk(customerId);
+      if (!customer) {
+        throw new ApiError(400, 'Müşteri bulunamadı');
       }
     }
 
-    // Create order
-    const order = new Order({
-      table: tableId,
-      items: processedItems,
-      totalAmount,
-      waiter: req.user._id,
-      customer
+    // Sipariş oluştur
+    const order = await Order.create({
+      tableId,
+      waiterId: req.user.id,
+      customerId,
+      note
     });
 
-    await order.save();
+    // Sipariş kalemleri ekle
+    if (items && items.length > 0) {
+      for (const item of items) {
+        await order.addItem(
+          item.productId,
+          item.quantity,
+          item.note,
+          item.options
+        );
+      }
+    }
 
-    // Update table status
-    table.status = 'occupied';
-    table.currentOrder = order._id;
-    await table.save();
+    // Masa durumunu güncelle
+    await table.updateStatus('occupied');
 
-    // Populate references for response
-    await order.populate([
-      { path: 'table', select: 'name number' },
-      { path: 'waiter', select: 'name' },
-      { path: 'items.product', select: 'name code' }
-    ]);
-
-    // Send real-time notification
-    socketService?.notifyNewOrder(order);
-
-    res.status(201).json({
-      message: 'Sipariş başarıyla oluşturuldu',
-      order
+    // İlişkili verileri içeren siparişi döndür
+    const orderWithRelations = await Order.findByPk(order.id, {
+      include: [
+        {
+          model: User,
+          as: 'waiter',
+          attributes: ['id', 'name']
+        },
+        {
+          model: Table,
+          attributes: ['id', 'number']
+        },
+        {
+          model: OrderItem,
+          as: 'orderItems',
+          include: [{
+            model: Product,
+            attributes: ['id', 'name', 'price', 'image']
+          }]
+        }
+      ]
     });
+
+    // Gerçek zamanlı bildirim gönder
+    socketService.notifyNewOrder(orderWithRelations);
+
+    res.status(201).json(orderWithRelations);
   } catch (error) {
-    console.error('Create order error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    if (error instanceof ValidationError) {
+      throw new ApiError(400, 'Geçersiz sipariş bilgileri', error.errors);
+    }
+    throw error;
   }
 };
 
-// @desc    Update order item status
-// @route   PATCH /api/orders/:id/items/:itemId/status
-// @access  Private
-exports.updateOrderItemStatus = async (req, res) => {
+// @desc    Update order
+// @route   PUT /api/orders/:id
+// @access  Private (Waiter only)
+exports.updateOrder = async (req, res) => {
+  const order = await Order.findByPk(req.params.id);
+  
+  if (!order) {
+    throw new ApiError(404, 'Sipariş bulunamadı');
+  }
+
+  // Sadece bekleyen siparişler güncellenebilir
+  if (order.status !== 'pending') {
+    throw new ApiError(400, 'Sadece bekleyen siparişler güncellenebilir');
+  }
+
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    const { note, items } = req.body;
+
+    // Sipariş notunu güncelle
+    if (note !== undefined) {
+      order.note = note;
+      await order.save();
     }
 
-    const { status } = req.body;
-    const { id, itemId } = req.params;
-
-    const order = await Order.findById(id);
-    if (!order) {
-      return res.status(404).json({ message: 'Sipariş bulunamadı' });
+    // Sipariş kalemlerini güncelle
+    if (items && items.length > 0) {
+      for (const item of items) {
+        if (item.id) {
+          // Mevcut kalem güncelleme
+          if (item.quantity === 0) {
+            await order.removeItem(item.id);
+          } else {
+            await order.updateItem(item.id, item.quantity, item.note);
+          }
+        } else {
+          // Yeni kalem ekleme
+          await order.addItem(
+            item.productId,
+            item.quantity,
+            item.note,
+            item.options
+          );
+        }
+      }
     }
 
-    const updatedItem = await order.updateItemStatus(itemId, status);
-    
-    // Send real-time notification
-    socketService?.notifyOrderStatusUpdate(order, updatedItem);
-
-    res.json({
-      message: 'Sipariş durumu güncellendi',
-      item: updatedItem
+    // İlişkili verileri içeren güncel siparişi döndür
+    const updatedOrder = await Order.findByPk(order.id, {
+      include: [
+        {
+          model: User,
+          as: 'waiter',
+          attributes: ['id', 'name']
+        },
+        {
+          model: Table,
+          attributes: ['id', 'number']
+        },
+        {
+          model: OrderItem,
+          as: 'orderItems',
+          include: [{
+            model: Product,
+            attributes: ['id', 'name', 'price', 'image']
+          }]
+        }
+      ]
     });
+
+    // Gerçek zamanlı bildirim gönder
+    socketService.notifyOrderStatusUpdate(updatedOrder);
+
+    res.json(updatedOrder);
   } catch (error) {
-    console.error('Update order item status error:', error);
-    if (error.message === 'Sipariş kalemi bulunamadı') {
-      return res.status(404).json({ message: error.message });
+    if (error instanceof ValidationError) {
+      throw new ApiError(400, 'Geçersiz sipariş bilgileri', error.errors);
     }
-    res.status(500).json({ message: 'Sunucu hatası' });
+    throw error;
+  }
+};
+
+// @desc    Delete order
+// @route   DELETE /api/orders/:id
+// @access  Private (Admin only)
+exports.deleteOrder = async (req, res) => {
+  const order = await Order.findByPk(req.params.id);
+  
+  if (!order) {
+    throw new ApiError(404, 'Sipariş bulunamadı');
+  }
+
+  // Sadece bekleyen siparişler silinebilir
+  if (order.status !== 'pending') {
+    throw new ApiError(400, 'Sadece bekleyen siparişler silinebilir');
+  }
+
+  // Sipariş kalemlerini sil (stokları iade et)
+  const items = await order.getOrderItems();
+  for (const item of items) {
+    await order.removeItem(item.id);
+  }
+
+  // Gerçek zamanlı bildirim gönder
+  socketService.notifyOrderCancelled(order);
+
+  await order.destroy();
+  res.status(204).send();
+};
+
+// @desc    Update order status
+// @route   PATCH /api/orders/:id/status
+// @access  Private
+exports.updateOrderStatus = async (req, res) => {
+  const { status } = req.body;
+  const order = await Order.findByPk(req.params.id);
+  
+  if (!order) {
+    throw new ApiError(404, 'Sipariş bulunamadı');
+  }
+
+  try {
+    await order.updateStatus(status);
+
+    // Sipariş tamamlandıysa veya iptal edildiyse masa durumunu güncelle
+    if (['completed', 'cancelled'].includes(status)) {
+      const table = await Table.findByPk(order.tableId);
+      if (table) {
+        const activeOrders = await Order.count({
+          where: {
+            tableId: table.id,
+            status: {
+              [Op.notIn]: ['completed', 'cancelled']
+            }
+          }
+        });
+
+        if (activeOrders === 0) {
+          await table.updateStatus('available');
+        }
+      }
+    }
+
+    // Gerçek zamanlı bildirim gönder
+    socketService.notifyOrderStatusUpdate(order);
+
+    res.json(order);
+  } catch (error) {
+    throw new ApiError(400, error.message);
   }
 };
 
 // @desc    Add payment to order
 // @route   POST /api/orders/:id/payments
-// @access  Private
+// @access  Private (Cashier only)
 exports.addPayment = async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    const { amount, method, transactionId } = req.body;
-    const order = await Order.findById(req.params.id);
-
-    if (!order) {
-      return res.status(404).json({ message: 'Sipariş bulunamadı' });
-    }
-
-    const updatedOrder = await order.addPayment({
-      amount,
-      method,
-      transactionId,
-      timestamp: new Date()
-    });
-
-    // If order is completed, update table status
-    if (updatedOrder.status === 'completed') {
-      await Table.findByIdAndUpdate(order.table, {
-        $set: { status: 'available', currentOrder: null }
-      });
-    }
-
-    // Send real-time notification
-    socketService?.notifyPayment(updatedOrder);
-
-    res.json({
-      message: 'Ödeme başarıyla eklendi',
-      order: updatedOrder
-    });
-  } catch (error) {
-    console.error('Add payment error:', error);
-    if (error.message.includes('Ödeme')) {
-      return res.status(400).json({ message: error.message });
-    }
-    res.status(500).json({ message: 'Sunucu hatası' });
+  const { amount, method } = req.body;
+  const order = await Order.findByPk(req.params.id);
+  
+  if (!order) {
+    throw new ApiError(404, 'Sipariş bulunamadı');
   }
-};
 
-// @desc    Cancel order
-// @route   PATCH /api/orders/:id/cancel
-// @access  Private
-exports.cancelOrder = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id);
-    if (!order) {
-      return res.status(404).json({ message: 'Sipariş bulunamadı' });
-    }
+    await order.addPayment(amount, method);
 
-    if (order.status !== 'active') {
-      return res.status(400).json({ message: 'Sadece aktif siparişler iptal edilebilir' });
-    }
+    // Gerçek zamanlı bildirim gönder
+    socketService.notifyOrderStatusUpdate(order);
 
-    // Return products to stock
-    for (const item of order.items) {
-      const product = await Product.findById(item.product);
-      if (product && product.stockTracking) {
-        await product.updateStock(item.quantity, 'add');
-      }
-    }
-
-    // Update order status
-    order.status = 'cancelled';
-    await order.save();
-
-    // Update table status
-    await Table.findByIdAndUpdate(order.table, {
-      $set: { status: 'available', currentOrder: null }
-    });
-
-    // Send real-time notification
-    socketService?.notifyOrderCancellation(order);
-
-    res.json({
-      message: 'Sipariş başarıyla iptal edildi',
-      order
-    });
+    res.json(order);
   } catch (error) {
-    console.error('Cancel order error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    throw new ApiError(400, error.message);
   }
 };
 

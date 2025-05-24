@@ -1,91 +1,119 @@
 const Product = require('../models/Product');
 const Category = require('../models/Category');
-const { validationResult } = require('express-validator');
+const { ValidationError, Op } = require('sequelize');
+const ApiError = require('../utils/ApiError');
+const socketService = require('../services/socketService');
 
 // @desc    Get all products
 // @route   GET /api/products
 // @access  Private
-exports.getProducts = async (req, res) => {
-  try {
-    const {
-      category,
-      search,
-      isActive,
-      isFeatured,
-      minStock,
-      sortBy = 'name',
-      order = 'asc',
-      page = 1,
-      limit = 10
-    } = req.query;
+exports.getAllProducts = async (req, res) => {
+  const {
+    categoryId,
+    search,
+    minPrice,
+    maxPrice,
+    isAvailable,
+    isVegetarian,
+    isVegan,
+    isGlutenFree,
+    spicyLevel,
+    page = 1,
+    limit = 10,
+    sortBy = 'name',
+    sortOrder = 'ASC'
+  } = req.query;
 
-    // Build query
-    const query = {};
-    
-    if (category) query.category = category;
-    if (isActive !== undefined) query.isActive = isActive === 'true';
-    if (isFeatured !== undefined) query.isFeatured = isFeatured === 'true';
-    if (minStock === 'true') {
-      query.stockTracking = true;
-      query.currentStock = { $lte: '$minStock' };
-    }
-    
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { tags: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Build sort
-    const sortQuery = {};
-    sortQuery[sortBy] = order === 'desc' ? -1 : 1;
-
-    // Execute query with pagination
-    const skip = (page - 1) * limit;
-    
-    const [products, total] = await Promise.all([
-      Product.find(query)
-        .populate('category', 'name')
-        .sort(sortQuery)
-        .skip(skip)
-        .limit(limit),
-      Product.countDocuments(query)
-    ]);
-
-    res.json({
-      products,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / limit)
-      }
-    });
-  } catch (error) {
-    console.error('Get products error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  // Filtreleme koşulları
+  const where = { isActive: true };
+  
+  if (categoryId) where.categoryId = categoryId;
+  if (search) {
+    where[Op.or] = [
+      { name: { [Op.like]: `%${search}%` } },
+      { description: { [Op.like]: `%${search}%` } }
+    ];
   }
+  if (minPrice) where.price = { ...where.price, [Op.gte]: minPrice };
+  if (maxPrice) where.price = { ...where.price, [Op.lte]: maxPrice };
+  if (isAvailable !== undefined) where.isAvailable = isAvailable;
+  if (isVegetarian !== undefined) where.isVegetarian = isVegetarian;
+  if (isVegan !== undefined) where.isVegan = isVegan;
+  if (isGlutenFree !== undefined) where.isGlutenFree = isGlutenFree;
+  if (spicyLevel) where.spicyLevel = spicyLevel;
+
+  // Sadece ana ürünleri listele (varyant olmayanlar)
+  where.parentId = null;
+
+  // Sayfalama
+  const offset = (page - 1) * limit;
+  
+  // Sıralama
+  const order = [[sortBy, sortOrder]];
+
+  const { count, rows: products } = await Product.findAndCountAll({
+    where,
+    include: [
+      {
+        model: Category,
+        attributes: ['id', 'name']
+      },
+      {
+        model: Product,
+        as: 'parent',
+        attributes: ['id', 'name'],
+        required: false
+      },
+      {
+        model: Product,
+        as: 'variants',
+        attributes: ['id', 'name', 'price'],
+        required: false
+      }
+    ],
+    order,
+    offset,
+    limit: parseInt(limit)
+  });
+
+  res.json({
+    products,
+    currentPage: parseInt(page),
+    totalPages: Math.ceil(count / limit),
+    totalItems: count
+  });
 };
 
 // @desc    Get product by ID
 // @route   GET /api/products/:id
 // @access  Private
 exports.getProductById = async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id)
-      .populate('category', 'name');
+  const product = await Product.findByPk(req.params.id, {
+    include: [
+      {
+        model: Category,
+        attributes: ['id', 'name']
+      },
+      {
+        model: Product,
+        as: 'parent',
+        attributes: ['id', 'name'],
+        required: false
+      },
+      {
+        model: Product,
+        as: 'variants',
+        attributes: ['id', 'name', 'price', 'options'],
+        required: false
+      }
+    ]
+  });
 
-    if (!product) {
-      return res.status(404).json({ message: 'Ürün bulunamadı' });
-    }
-
-    res.json(product);
-  } catch (error) {
-    console.error('Get product error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  if (!product) {
+    throw new ApiError(404, 'Ürün bulunamadı');
   }
+
+  res.json(product);
 };
 
 // @desc    Create new product
@@ -93,75 +121,41 @@ exports.getProductById = async (req, res) => {
 // @access  Private (Admin only)
 exports.createProduct = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    // Kategori kontrolü
+    const category = await Category.findByPk(req.body.categoryId);
+    if (!category) {
+      throw new ApiError(400, 'Geçersiz kategori');
     }
 
-    const {
-      name,
-      description,
-      category,
-      basePrice,
-      variations,
-      images,
-      stockTracking,
-      currentStock,
-      minStock,
-      preparationTime,
-      allergens,
-      nutritionalInfo,
-      tags,
-      code
-    } = req.body;
-
-    // Check if category exists
-    const existingCategory = await Category.findById(category);
-    if (!existingCategory) {
-      return res.status(400).json({ message: 'Kategori bulunamadı' });
-    }
-
-    // Check if code is unique if provided
-    if (code) {
-      const existingProduct = await Product.findOne({ code });
-      if (existingProduct) {
-        return res.status(400).json({ message: 'Bu ürün kodu zaten kullanımda' });
+    // Eğer bir varyant ise ana ürün kontrolü
+    if (req.body.parentId) {
+      const parentProduct = await Product.findByPk(req.body.parentId);
+      if (!parentProduct) {
+        throw new ApiError(400, 'Ana ürün bulunamadı');
+      }
+      if (parentProduct.parentId) {
+        throw new ApiError(400, 'Bir varyantın varyantı olamaz');
       }
     }
 
-    const product = new Product({
-      name,
-      description,
-      category,
-      basePrice,
-      variations,
-      images,
-      stockTracking,
-      currentStock,
-      minStock,
-      preparationTime,
-      allergens,
-      nutritionalInfo,
-      tags,
-      code,
-      priceHistory: [{
-        price: basePrice,
-        startDate: new Date()
-      }]
+    const product = await Product.create(req.body);
+    
+    // İlişkili verileri içeren ürünü döndür
+    const productWithRelations = await Product.findByPk(product.id, {
+      include: [
+        {
+          model: Category,
+          attributes: ['id', 'name']
+        }
+      ]
     });
 
-    await product.save();
-
-    // Populate category in response
-    await product.populate('category', 'name');
-
-    res.status(201).json({
-      message: 'Ürün başarıyla oluşturuldu',
-      product
-    });
+    res.status(201).json(productWithRelations);
   } catch (error) {
-    console.error('Create product error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    if (error instanceof ValidationError) {
+      throw new ApiError(400, 'Geçersiz ürün bilgileri', error.errors);
+    }
+    throw error;
   }
 };
 
@@ -169,83 +163,57 @@ exports.createProduct = async (req, res) => {
 // @route   PUT /api/products/:id
 // @access  Private (Admin only)
 exports.updateProduct = async (req, res) => {
+  const product = await Product.findByPk(req.params.id);
+  
+  if (!product) {
+    throw new ApiError(404, 'Ürün bulunamadı');
+  }
+
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    const oldStock = product.stock;
+    await product.update(req.body);
 
-    const {
-      name,
-      description,
-      category,
-      basePrice,
-      variations,
-      images,
-      stockTracking,
-      currentStock,
-      minStock,
-      preparationTime,
-      isActive,
-      isFeatured,
-      allergens,
-      nutritionalInfo,
-      tags,
-      code
-    } = req.body;
-
-    const product = await Product.findById(req.params.id);
-
-    if (!product) {
-      return res.status(404).json({ message: 'Ürün bulunamadı' });
-    }
-
-    // Check if category exists if changing
-    if (category && category !== product.category.toString()) {
-      const existingCategory = await Category.findById(category);
-      if (!existingCategory) {
-        return res.status(400).json({ message: 'Kategori bulunamadı' });
+    // Stok değişikliği varsa kontrol et
+    if (product.stock !== oldStock) {
+      // Stok minimum seviyenin altına düştüyse bildirim gönder
+      if (product.stock <= product.minStock) {
+        socketService.notifyLowStock(product);
       }
-      product.category = category;
-    }
 
-    // Check if code is unique if changing
-    if (code && code !== product.code) {
-      const existingProduct = await Product.findOne({ code });
-      if (existingProduct) {
-        return res.status(400).json({ message: 'Bu ürün kodu zaten kullanımda' });
+      // Stok tükendiyse bildirim gönder
+      if (product.stock === 0) {
+        socketService.notifyOutOfStock(product);
       }
-      product.code = code;
     }
 
-    // Update fields
-    if (name) product.name = name;
-    if (description !== undefined) product.description = description;
-    if (basePrice !== undefined) product.basePrice = basePrice;
-    if (variations) product.variations = variations;
-    if (images) product.images = images;
-    if (stockTracking !== undefined) product.stockTracking = stockTracking;
-    if (currentStock !== undefined) product.currentStock = currentStock;
-    if (minStock !== undefined) product.minStock = minStock;
-    if (preparationTime !== undefined) product.preparationTime = preparationTime;
-    if (typeof isActive === 'boolean') product.isActive = isActive;
-    if (typeof isFeatured === 'boolean') product.isFeatured = isFeatured;
-    if (allergens) product.allergens = allergens;
-    if (nutritionalInfo) product.nutritionalInfo = nutritionalInfo;
-    if (tags) product.tags = tags;
-
-    await product.save();
-
-    // Populate category in response
-    await product.populate('category', 'name');
-
-    res.json({
-      message: 'Ürün başarıyla güncellendi',
-      product
+    // İlişkili verileri içeren güncel ürünü döndür
+    const updatedProduct = await Product.findByPk(product.id, {
+      include: [
+        {
+          model: Category,
+          attributes: ['id', 'name']
+        },
+        {
+          model: Product,
+          as: 'parent',
+          attributes: ['id', 'name'],
+          required: false
+        },
+        {
+          model: Product,
+          as: 'variants',
+          attributes: ['id', 'name', 'price', 'options'],
+          required: false
+        }
+      ]
     });
+
+    res.json(updatedProduct);
   } catch (error) {
-    console.error('Update product error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+    if (error instanceof ValidationError) {
+      throw new ApiError(400, 'Geçersiz ürün bilgileri', error.errors);
+    }
+    throw error;
   }
 };
 
@@ -253,67 +221,70 @@ exports.updateProduct = async (req, res) => {
 // @route   DELETE /api/products/:id
 // @access  Private (Admin only)
 exports.deleteProduct = async (req, res) => {
-  try {
-    const product = await Product.findById(req.params.id);
-
-    if (!product) {
-      return res.status(404).json({ message: 'Ürün bulunamadı' });
-    }
-
-    await product.remove();
-
-    res.json({ message: 'Ürün başarıyla silindi' });
-  } catch (error) {
-    console.error('Delete product error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+  const product = await Product.findByPk(req.params.id);
+  
+  if (!product) {
+    throw new ApiError(404, 'Ürün bulunamadı');
   }
+
+  // Varyantları kontrol et
+  const variants = await product.getVariants();
+  if (variants.length > 0) {
+    throw new ApiError(400, 'Varyantları olan ürün silinemez');
+  }
+
+  await product.destroy();
+  res.status(204).send();
 };
 
 // @desc    Update product stock
 // @route   PATCH /api/products/:id/stock
-// @access  Private (Admin & Kitchen)
+// @access  Private (Admin, Manager only)
 exports.updateStock = async (req, res) => {
+  const { quantity, operation } = req.body;
+  const product = await Product.findByPk(req.params.id);
+  
+  if (!product) {
+    throw new ApiError(404, 'Ürün bulunamadı');
+  }
+
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    const oldStock = product.stock;
+    await product.updateStock(quantity, operation);
+
+    // Stok minimum seviyenin altına düştüyse bildirim gönder
+    if (product.stock <= product.minStock) {
+      socketService.notifyLowStock(product);
     }
 
-    const { quantity, type } = req.body;
-    const product = await Product.findById(req.params.id);
-
-    if (!product) {
-      return res.status(404).json({ message: 'Ürün bulunamadı' });
+    // Stok tükendiyse bildirim gönder
+    if (product.stock === 0) {
+      socketService.notifyOutOfStock(product);
     }
 
-    if (!product.stockTracking) {
-      return res.status(400).json({ message: 'Bu ürün için stok takibi yapılmıyor' });
-    }
-
-    await product.updateStock(quantity, type);
-
-    res.json({
-      message: 'Stok başarıyla güncellendi',
-      currentStock: product.currentStock
-    });
+    res.json(product);
   } catch (error) {
-    console.error('Update stock error:', error);
-    if (error.message === 'Yetersiz stok') {
-      return res.status(400).json({ message: error.message });
-    }
-    res.status(500).json({ message: 'Sunucu hatası' });
+    throw new ApiError(400, error.message);
   }
 };
 
-// @desc    Get low stock products
-// @route   GET /api/products/low-stock
+// @desc    Update product availability
+// @route   PATCH /api/products/:id/availability
 // @access  Private (Admin & Kitchen)
-exports.getLowStockProducts = async (req, res) => {
-  try {
-    const products = await Product.getLowStockProducts();
-    res.json(products);
-  } catch (error) {
-    console.error('Get low stock products error:', error);
-    res.status(500).json({ message: 'Sunucu hatası' });
+exports.updateAvailability = async (req, res) => {
+  const { isAvailable } = req.body;
+  const product = await Product.findByPk(req.params.id);
+  
+  if (!product) {
+    throw new ApiError(404, 'Ürün bulunamadı');
   }
+
+  if (typeof isAvailable !== 'boolean') {
+    throw new ApiError(400, 'Geçersiz kullanılabilirlik değeri');
+  }
+
+  product.isAvailable = isAvailable;
+  await product.save();
+
+  res.json(product);
 }; 
