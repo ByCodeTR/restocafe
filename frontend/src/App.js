@@ -1,11 +1,15 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { useSelector } from 'react-redux';
+import Routes from './routes';
+import Layout from './components/Layout';
+import Notifications from './components/Notifications';
+import socketService from './services/socketService';
 
 // Layout components
-import Layout from './components/layout/Layout';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 
 // Pages
@@ -22,6 +26,16 @@ import Settings from './pages/settings/Settings';
 import store from './store';
 
 function App() {
+  const { isAuthenticated, user } = useSelector(state => state.auth);
+
+  // Socket bağlantısını yönet
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      socketService.connect();
+      return () => socketService.disconnect();
+    }
+  }, [isAuthenticated, user]);
+
   return (
     <Provider store={store}>
       <Router>
@@ -73,6 +87,7 @@ function App() {
             } />
           </Route>
         </Routes>
+        <Notifications />
       </Router>
     </Provider>
   );
