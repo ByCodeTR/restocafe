@@ -1,47 +1,64 @@
 const express = require('express');
 const { body } = require('express-validator');
-const router = express.Router();
-const { auth, authorize } = require('../middleware/auth');
-const {
-  register,
-  login,
-  getProfile,
-  updateProfile
-} = require('../controllers/authController');
+const authController = require('../controllers/authController');
+const { protect } = require('../middleware/authMiddleware');
 
-// Validation middleware
+const router = express.Router();
+
+// Validation kuralları
 const registerValidation = [
   body('username')
     .trim()
     .isLength({ min: 3 })
     .withMessage('Kullanıcı adı en az 3 karakter olmalıdır'),
+  body('email')
+    .isEmail()
+    .withMessage('Geçerli bir email adresi giriniz'),
   body('password')
     .isLength({ min: 6 })
     .withMessage('Şifre en az 6 karakter olmalıdır'),
-  body('fullName')
+  body('firstName')
     .trim()
     .notEmpty()
-    .withMessage('Ad Soyad alanı zorunludur'),
+    .withMessage('Ad alanı zorunludur'),
+  body('lastName')
+    .trim()
+    .notEmpty()
+    .withMessage('Soyad alanı zorunludur'),
   body('role')
-    .isIn(['admin', 'waiter', 'kitchen', 'cashier'])
+    .optional()
+    .isIn(['admin', 'manager', 'waiter', 'kitchen', 'cashier'])
     .withMessage('Geçersiz rol')
 ];
 
 const loginValidation = [
-  body('username').trim().notEmpty().withMessage('Kullanıcı adı zorunludur'),
-  body('password').notEmpty().withMessage('Şifre zorunludur')
+  body('email')
+    .isEmail()
+    .withMessage('Geçerli bir email adresi giriniz'),
+  body('password')
+    .notEmpty()
+    .withMessage('Şifre alanı zorunludur')
 ];
 
 const updateProfileValidation = [
-  body('fullName')
+  body('email')
+    .optional()
+    .isEmail()
+    .withMessage('Geçerli bir email adresi giriniz'),
+  body('firstName')
     .optional()
     .trim()
     .notEmpty()
-    .withMessage('Ad Soyad alanı boş olamaz'),
-  body('currentPassword')
+    .withMessage('Ad alanı boş olamaz'),
+  body('lastName')
     .optional()
-    .isLength({ min: 6 })
-    .withMessage('Mevcut şifre en az 6 karakter olmalıdır'),
+    .trim()
+    .notEmpty()
+    .withMessage('Soyad alanı boş olamaz'),
+  body('currentPassword')
+    .if(body('newPassword').exists())
+    .notEmpty()
+    .withMessage('Mevcut şifre gereklidir'),
   body('newPassword')
     .optional()
     .isLength({ min: 6 })
@@ -49,30 +66,9 @@ const updateProfileValidation = [
 ];
 
 // Routes
-router.post('/register', [auth, authorize('admin'), ...registerValidation], register);
-router.post('/login', loginValidation, login);
-router.get('/me', auth, getProfile);
-router.put('/profile', [auth, ...updateProfileValidation], updateProfile);
-
-// Temporary route handlers
-router.post('/register', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
-
-router.post('/login', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
-
-router.post('/logout', (req, res) => {
-  res.status(501).json({ message: 'Not implemented yet' });
-});
-
-router.get('/me', (req, res) => {
-  res.json({ message: 'Get current user endpoint' });
-});
-
-router.put('/profile', (req, res) => {
-  res.json({ message: 'Update profile endpoint' });
-});
+router.post('/register', registerValidation, authController.register);
+router.post('/login', loginValidation, authController.login);
+router.get('/me', protect, authController.getProfile);
+router.put('/profile', protect, updateProfileValidation, authController.updateProfile);
 
 module.exports = router; 

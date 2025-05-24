@@ -1,12 +1,16 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { validationResult } = require('express-validator');
+const config = require('../config');
 
 // Generate JWT Token
-const generateToken = (userId) => {
+const generateToken = (user) => {
   return jwt.sign(
-    { userId },
-    process.env.JWT_SECRET,
+    { 
+      id: user.id,
+      role: user.role
+    },
+    process.env.JWT_SECRET || 'your-secret-key',
     { expiresIn: '24h' }
   );
 };
@@ -21,32 +25,41 @@ exports.register = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { username, password, fullName, role } = req.body;
+    const { username, email, password, firstName, lastName, role } = req.body;
 
-    // Check if user already exists
-    let user = await User.findOne({ username });
-    if (user) {
-      return res.status(400).json({ message: 'Bu kullanıcı adı zaten kullanılıyor' });
-    }
-
-    // Create new user
-    user = new User({
-      username,
-      password,
-      fullName,
-      role
+    // Email ve kullanıcı adı kontrolü
+    const existingUser = await User.findOne({
+      where: {
+        [Op.or]: [{ email }, { username }]
+      }
     });
 
-    await user.save();
+    if (existingUser) {
+      return res.status(400).json({
+        message: 'Bu email veya kullanıcı adı zaten kullanımda'
+      });
+    }
+
+    // Yeni kullanıcı oluşturma
+    const user = await User.create({
+      username,
+      email,
+      password,
+      firstName,
+      lastName,
+      role: role || 'waiter'
+    });
+
+    // Şifreyi response'dan çıkar
+    const userWithoutPassword = { ...user.toJSON() };
+    delete userWithoutPassword.password;
+
+    // Token oluştur
+    const token = generateToken(user);
 
     res.status(201).json({
-      message: 'Kullanıcı başarıyla oluşturuldu',
-      user: {
-        id: user._id,
-        username: user.username,
-        fullName: user.fullName,
-        role: user.role
-      }
+      user: userWithoutPassword,
+      token
     });
   } catch (error) {
     console.error('Register error:', error);
@@ -64,36 +77,33 @@ exports.login = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { username, password } = req.body;
+    const { email, password } = req.body;
 
-    // Check if user exists
-    const user = await User.findOne({ username });
+    // Kullanıcıyı bul
+    const user = await User.findOne({ where: { email } });
     if (!user) {
-      return res.status(401).json({ message: 'Geçersiz kullanıcı adı veya şifre' });
+      return res.status(401).json({ message: 'Geçersiz email veya şifre' });
     }
 
-    // Check if user is active
-    if (!user.isActive) {
-      return res.status(401).json({ message: 'Hesabınız devre dışı bırakılmış' });
-    }
-
-    // Check password
+    // Şifreyi kontrol et
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Geçersiz kullanıcı adı veya şifre' });
+      return res.status(401).json({ message: 'Geçersiz email veya şifre' });
     }
 
-    // Generate token
-    const token = generateToken(user._id);
+    // Son giriş tarihini güncelle
+    await user.update({ lastLoginAt: new Date() });
+
+    // Token oluştur
+    const token = generateToken(user);
+
+    // Şifreyi response'dan çıkar
+    const userWithoutPassword = { ...user.toJSON() };
+    delete userWithoutPassword.password;
 
     res.json({
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        fullName: user.fullName,
-        role: user.role
-      }
+      user: userWithoutPassword,
+      token
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -106,7 +116,14 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('-password');
+    const user = await User.findByPk(req.user.id, {
+      attributes: { exclude: ['password'] }
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'Kullanıcı bulunamadı' });
+    }
+
     res.json(user);
   } catch (error) {
     console.error('Get profile error:', error);
@@ -124,31 +141,36 @@ exports.updateProfile = async (req, res) => {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { fullName, currentPassword, newPassword } = req.body;
-    const user = await User.findById(req.user._id);
+    const { firstName, lastName, email, currentPassword, newPassword } = req.body;
+    const user = await User.findByPk(req.user.id);
 
-    if (fullName) {
-      user.fullName = fullName;
+    if (!user) {
+      return res.status(404).json({ message: 'Kullanıcı bulunamadı' });
     }
 
-    if (currentPassword && newPassword) {
+    // Şifre değişikliği varsa kontrol et
+    if (newPassword) {
       const isMatch = await user.comparePassword(currentPassword);
       if (!isMatch) {
-        return res.status(400).json({ message: 'Mevcut şifre yanlış' });
+        return res.status(401).json({ message: 'Mevcut şifre yanlış' });
       }
-      user.password = newPassword;
     }
 
-    await user.save();
+    // Kullanıcıyı güncelle
+    await user.update({
+      firstName: firstName || user.firstName,
+      lastName: lastName || user.lastName,
+      email: email || user.email,
+      password: newPassword || user.password
+    });
+
+    // Şifreyi response'dan çıkar
+    const userWithoutPassword = { ...user.toJSON() };
+    delete userWithoutPassword.password;
 
     res.json({
-      message: 'Profil başarıyla güncellendi',
-      user: {
-        id: user._id,
-        username: user.username,
-        fullName: user.fullName,
-        role: user.role
-      }
+      user: userWithoutPassword,
+      message: 'Profil başarıyla güncellendi'
     });
   } catch (error) {
     console.error('Update profile error:', error);
